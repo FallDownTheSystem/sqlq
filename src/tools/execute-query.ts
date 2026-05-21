@@ -62,9 +62,9 @@ export class ExecuteQueryTool extends BaseTool {
 			};
 		} catch (error) {
 			const executionTime = Date.now() - startTime;
-			const mcpError = ErrorHandler.handleSqlServerError(error);
-			mcpError.message = `${mcpError.message} (execution time: ${executionTime}ms)`;
-			throw mcpError;
+			const handled = ErrorHandler.handleSqlServerError(error);
+			handled.message = `${handled.message} (execution time: ${executionTime}ms)`;
+			throw handled;
 		}
 	}
 }

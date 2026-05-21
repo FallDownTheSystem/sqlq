@@ -32,8 +32,7 @@ export abstract class BaseTool {
 			await connection.connect();
 			return await this.executeQuery<T>(query, maxRowsOverride, database);
 		} catch (error) {
-			const mcpError = ErrorHandler.handleSqlServerError(error);
-			throw mcpError;
+			throw ErrorHandler.handleSqlServerError(error);
 		}
 	}
 
@@ -57,8 +56,7 @@ export abstract class BaseTool {
 			await connection.connect();
 			return await this.executeQueryWithParams<T>(query, params, database);
 		} catch (error) {
-			const mcpError = ErrorHandler.handleSqlServerError(error);
-			throw mcpError;
+			throw ErrorHandler.handleSqlServerError(error);
 		}
 	}
 

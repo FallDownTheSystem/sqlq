@@ -19,9 +19,6 @@ build/
 config/database.json
 config/secrets.json
 
-# MCP Server specific
-mcp-server-*.log
-claude-desktop-config.json
 *.sqlite
 *.db
 

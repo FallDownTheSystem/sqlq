@@ -1,22 +1,20 @@
-# MCP SQL Server
+# sqlq
 
-A read-only [MCP](https://modelcontextprotocol.io/) server for Microsoft SQL Server. Gives AI agents safe access to explore and query your databases.
+A read-only Microsoft SQL Server CLI. Explore databases, inspect schemas, and run queries directly from your terminal.
 
-> Forked from [`@bilims/mcp-sqlserver`](https://github.com/AhmedBilims/mcp-sqlserver) by Onur Keskin. This fork adds per-tool database targeting, a connection pool manager, and the `sqlq` CLI.
+> Forked from [`@bilims/mcp-sqlserver`](https://github.com/AhmedBilims/mcp-sqlserver) by Onur Keskin. The original project was an MCP server; this fork strips the MCP layer and keeps only the CLI on top of the same query engine and security layer.
 
 ## Install
 
 ```bash
-npm install -g @falldownthesystem/mcp-sqlserver
+npm install -g @falldownthesystem/sqlq
 ```
 
 Or run it directly:
 
 ```bash
-npx @falldownthesystem/mcp-sqlserver
+npx @falldownthesystem/sqlq
 ```
-
-This gives you two commands: `mcp-sqlserver` (the MCP server) and `sqlq` (a standalone CLI for querying from your terminal).
 
 ## Configure
 
@@ -40,65 +38,9 @@ You can also set these optional variables:
 | `SQLSERVER_REQUEST_TIMEOUT` | `60000` | Query timeout (ms) |
 | `SQLSERVER_MAX_ROWS` | `1000` | Max rows returned per query |
 
-## MCP Integration
+`sqlq` also reads a `.env` file from the current working directory.
 
-### Claude Desktop
-
-Add this to your `claude_desktop_config.json`:
-- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "sqlserver": {
-      "command": "mcp-sqlserver",
-      "env": {
-        "SQLSERVER_HOST": "your-server.database.windows.net",
-        "SQLSERVER_USER": "your-username",
-        "SQLSERVER_PASSWORD": "your-password",
-        "SQLSERVER_DATABASE": "your-database"
-      }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add sqlserver mcp-sqlserver \
-  -e SQLSERVER_HOST=your-server \
-  -e SQLSERVER_USER=your-username \
-  -e SQLSERVER_PASSWORD=your-password
-```
-
-## Available Tools
-
-All queries are validated to be read-only. SELECT, WITH, SHOW, DESCRIBE, and EXPLAIN are allowed. Everything else is blocked.
-
-| Tool | What it does |
-|---|---|
-| `list_databases` | List all databases on the server |
-| `list_tables` | List tables in a database or schema |
-| `list_views` | List views in a database or schema |
-| `describe_table` | Column names, types, nullability, defaults |
-| `get_foreign_keys` | Foreign key relationships for a table |
-| `get_table_stats` | Row counts and size info |
-| `execute_query` | Run a read-only SELECT query |
-| `get_server_info` | Server version, edition, config |
-
-Every tool accepts an optional `database` parameter, so you can target a specific database without changing your connection config.
-
-## sqlq CLI
-
-`sqlq` is a standalone command-line tool that wraps the same MCP tools into a terminal interface. It connects to your SQL Server using the same environment variables and lets you explore databases, inspect schemas, and run queries directly from your shell.
-
-### As an Agent Skill
-
-If you'd rather not run an MCP server, you can use `sqlq` through an [Agent Skill](https://agentskills.io) instead. A SKILL.md file gives any compatible coding agent the same database access by calling the CLI directly. The repo includes a reference skill at [`examples/sqlq-skill.md`](examples/sqlq-skill.md) that covers all commands, output modes, connection options, and error handling. Copy it into your project or global skills directory.
-
-### Usage
+## Usage
 
 ```bash
 # Connection uses the same SQLSERVER_* env vars, or you can override with flags
@@ -120,6 +62,8 @@ sqlq query "SELECT ..."     # Run a read-only query
 sqlq query -f query.sql     # Run SQL from a file
 sqlq config                 # Show resolved connection config
 ```
+
+Every command accepts an optional `-d/--database` flag to target a specific database without changing your connection config.
 
 ### Output Formats
 
@@ -168,6 +112,10 @@ echo "$DB_PASSWORD" | sqlq --password-stdin databases
 sqlq -d mydb query -f reports/monthly.sql
 ```
 
+## As an Agent Skill
+
+You can give a coding agent terminal-level SQL Server access by exposing `sqlq` through an [Agent Skill](https://agentskills.io). The repo includes a reference skill at [`examples/sqlq-skill.md`](examples/sqlq-skill.md) covering all commands, output modes, connection options, and error handling. Copy it into your project or global skills directory.
+
 ## Security
 
 All queries go through multiple validation layers before reaching the database:
@@ -185,8 +133,7 @@ The user account only needs `CONNECT` and `SELECT` permissions.
 ```bash
 npm install          # Install dependencies
 npm run build        # Compile TypeScript
-npm run dev          # Run MCP server with tsx
-npm run cli-dev      # Run sqlq CLI with tsx
+npm run dev          # Run sqlq with tsx
 npm run lint         # ESLint
 npm test             # Jest
 ```

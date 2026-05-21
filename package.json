@@ -1,60 +1,50 @@
 {
-  "name": "@falldownthesystem/mcp-sqlserver",
-  "version": "2.3.0",
-  "description": "A read-only Model Context Protocol (MCP) server for Microsoft SQL Server that enables AI agents to safely explore and query SQL Server databases",
+  "name": "@falldownthesystem/sqlq",
+  "version": "3.0.0",
+  "description": "Read-only Microsoft SQL Server CLI for exploring databases, schemas, and running queries from the terminal",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mcp-sqlserver": "dist/index.js",
-    "sqlq": "dist/cli-app.js"
+    "sqlq": "dist/index.js"
   },
   "files": [
     "dist",
     "README.md",
     "LICENSE",
-    "INSTALL.md",
-    "QUICK-START.md",
     "examples"
   ],
   "scripts": {
     "build": "tsc",
     "prepublishOnly": "npm run build",
     "dev": "tsx src/index.ts",
-    "cli-dev": "tsx src/cli-app.ts",
     "start": "node dist/index.js",
-    "setup": "npm run build && echo 'Setup complete! See README.md for configuration instructions.'",
-    "test-connection": "node dist/index.js --help || echo 'Please set environment variables. See README.md for details.'",
     "lint": "eslint src/**/*.ts",
     "test": "jest"
   },
   "keywords": [
-    "mcp",
-    "model-context-protocol",
     "sql-server",
     "mssql",
+    "cli",
     "database",
-    "ai",
-    "assistant",
-    "claude",
     "readonly",
     "schema-discovery",
-    "data-exploration"
+    "data-exploration",
+    "query"
   ],
-  "author": "Bilims",
+  "author": "FallDownTheSystem",
   "license": "MIT",
-  "homepage": "https://github.com/FallDownTheSystem/mcp-sqlserver",
+  "homepage": "https://github.com/FallDownTheSystem/sqlq",
   "repository": {
     "type": "git",
-    "url": "https://github.com/FallDownTheSystem/mcp-sqlserver.git"
+    "url": "git+https://github.com/FallDownTheSystem/sqlq.git"
   },
   "bugs": {
-    "url": "https://github.com/FallDownTheSystem/mcp-sqlserver/issues"
+    "url": "https://github.com/FallDownTheSystem/sqlq/issues"
   },
   "publishConfig": {
     "access": "public"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.0",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.0",
     "dotenv": "^17.3.1",

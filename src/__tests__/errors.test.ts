@@ -1,5 +1,5 @@
 import {
-	MCPError,
+	SqlqError,
 	ConnectionError,
 	ValidationError,
 	SecurityError,
@@ -10,12 +10,12 @@ import {
 } from '../errors.js';
 
 describe('Error classes', () => {
-	it('MCPError should have correct properties', () => {
-		const err = new MCPError('test', 'TEST_CODE', { detail: 1 });
+	it('SqlqError should have correct properties', () => {
+		const err = new SqlqError('test', 'TEST_CODE', { detail: 1 });
 		expect(err.message).toBe('test');
 		expect(err.code).toBe('TEST_CODE');
 		expect(err.details).toEqual({ detail: 1 });
-		expect(err.name).toBe('MCPError');
+		expect(err.name).toBe('SqlqError');
 		expect(err).toBeInstanceOf(Error);
 	});
 
@@ -23,7 +23,7 @@ describe('Error classes', () => {
 		const err = new ConnectionError('conn failed');
 		expect(err.code).toBe('CONNECTION_ERROR');
 		expect(err.name).toBe('ConnectionError');
-		expect(err).toBeInstanceOf(MCPError);
+		expect(err).toBeInstanceOf(SqlqError);
 	});
 
 	it('ValidationError should set correct code', () => {
@@ -60,7 +60,7 @@ describe('Error classes', () => {
 describe('ErrorHandler.handleSqlServerError', () => {
 	it('should handle null/undefined error', () => {
 		const result = ErrorHandler.handleSqlServerError(null);
-		expect(result).toBeInstanceOf(MCPError);
+		expect(result).toBeInstanceOf(SqlqError);
 		expect(result.code).toBe('UNKNOWN_ERROR');
 	});
 
@@ -219,7 +219,7 @@ describe('ErrorHandler.formatErrorForUser', () => {
 	});
 
 	it('should return empty suggestions for unknown error codes', () => {
-		const err = new MCPError('unknown', 'UNKNOWN_ERROR');
+		const err = new SqlqError('unknown', 'UNKNOWN_ERROR');
 		const result = ErrorHandler.formatErrorForUser(err);
 		expect(result.suggestions).toEqual([]);
 	});

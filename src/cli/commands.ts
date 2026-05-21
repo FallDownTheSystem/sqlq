@@ -55,8 +55,8 @@ async function runTool(
 			formatter(result, ctx.mode);
 		}
 	} catch (error) {
-		const mcpError = ErrorHandler.handleSqlServerError(error);
-		const userError = ErrorHandler.formatErrorForUser(mcpError);
+		const handled = ErrorHandler.handleSqlServerError(error);
+		const userError = ErrorHandler.formatErrorForUser(handled);
 		s?.error(userError.error);
 		outputError(userError, ctx.mode);
 		process.exitCode = 1;

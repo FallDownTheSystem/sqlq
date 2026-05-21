@@ -1,50 +1,50 @@
-export class MCPError extends Error {
+export class SqlqError extends Error {
   constructor(
     message: string,
     public readonly code: string,
     public readonly details?: any
   ) {
     super(message);
-    this.name = 'MCPError';
+    this.name = 'SqlqError';
   }
 }
 
-export class ConnectionError extends MCPError {
+export class ConnectionError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'CONNECTION_ERROR', details);
     this.name = 'ConnectionError';
   }
 }
 
-export class ValidationError extends MCPError {
+export class ValidationError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'VALIDATION_ERROR', details);
     this.name = 'ValidationError';
   }
 }
 
-export class SecurityError extends MCPError {
+export class SecurityError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'SECURITY_ERROR', details);
     this.name = 'SecurityError';
   }
 }
 
-export class QueryError extends MCPError {
+export class QueryError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'QUERY_ERROR', details);
     this.name = 'QueryError';
   }
 }
 
-export class TimeoutError extends MCPError {
+export class TimeoutError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'TIMEOUT_ERROR', details);
     this.name = 'TimeoutError';
   }
 }
 
-export class PermissionError extends MCPError {
+export class PermissionError extends SqlqError {
   constructor(message: string, details?: any) {
     super(message, 'PERMISSION_ERROR', details);
     this.name = 'PermissionError';
@@ -52,9 +52,9 @@ export class PermissionError extends MCPError {
 }
 
 export class ErrorHandler {
-  static handleSqlServerError(error: any): MCPError {
+  static handleSqlServerError(error: any): SqlqError {
     if (!error) {
-      return new MCPError('Unknown database error occurred', 'UNKNOWN_ERROR');
+      return new SqlqError('Unknown database error occurred', 'UNKNOWN_ERROR');
     }
 
     const message = error.message || error.toString();
@@ -174,7 +174,7 @@ export class ErrorHandler {
     );
   }
 
-  static formatErrorForUser(error: MCPError): {
+  static formatErrorForUser(error: SqlqError): {
     error: string;
     code: string;
     suggestions?: string[];
