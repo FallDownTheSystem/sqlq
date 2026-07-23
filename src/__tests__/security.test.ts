@@ -92,10 +92,14 @@ describe('QueryValidator', () => {
 			expect(result.error).toBe('Potential SQL injection pattern detected');
 		});
 
-		it('should detect UNION SELECT injection', () => {
-			const result = QueryValidator.validateQuery('SELECT * FROM Users UNION SELECT password FROM secrets');
+		it('should accept UNION and UNION ALL queries', () => {
+			expect(QueryValidator.validateQuery('SELECT name FROM Users UNION SELECT name FROM Customers')).toEqual({ isValid: true });
+			expect(QueryValidator.validateQuery('SELECT id FROM Orders UNION ALL SELECT id FROM ArchivedOrders')).toEqual({ isValid: true });
+		});
+
+		it('should still reject forbidden keywords in UNION queries', () => {
+			const result = QueryValidator.validateQuery('SELECT name FROM Users UNION SELECT name FROM Customers; DELETE FROM Users');
 			expect(result.isValid).toBe(false);
-			expect(result.error).toBe('Potential SQL injection pattern detected');
 		});
 
 		it('should detect statement injection via semicolon', () => {
@@ -139,6 +143,33 @@ describe('QueryValidator', () => {
 
 		it('should preserve leading whitespace in replacement', () => {
 			expect(QueryValidator.addRowLimit('  SELECT * FROM Users', 10)).toBe('  SELECT TOP 10 * FROM Users');
+		});
+
+		it('should wrap UNION queries in a derived table instead of limiting the first branch', () => {
+			expect(QueryValidator.addRowLimit('SELECT a FROM t1 UNION ALL SELECT a FROM t2', 100))
+				.toBe('SELECT TOP 100 * FROM (SELECT a FROM t1 UNION ALL SELECT a FROM t2) AS [__sqlq_limit]');
+		});
+
+		it('should hoist a trailing ORDER BY outside the UNION wrapper', () => {
+			expect(QueryValidator.addRowLimit('SELECT a FROM t1 UNION SELECT a FROM t2 ORDER BY a', 50))
+				.toBe('SELECT TOP 50 * FROM (SELECT a FROM t1 UNION SELECT a FROM t2) AS [__sqlq_limit] ORDER BY a');
+		});
+
+		it('should not treat UNION inside a subquery as top-level for ORDER BY hoisting', () => {
+			expect(QueryValidator.addRowLimit('SELECT a FROM (SELECT a FROM t1 UNION SELECT a FROM t2) AS x', 25))
+				.toBe('SELECT TOP 25 a FROM (SELECT a FROM t1 UNION SELECT a FROM t2) AS x');
+		});
+
+		it('should not treat UNION inside string literals or identifiers as a union', () => {
+			expect(QueryValidator.addRowLimit("SELECT 'credit UNION member' AS label FROM t", 10))
+				.toBe("SELECT TOP 10 'credit UNION member' AS label FROM t");
+			expect(QueryValidator.addRowLimit('SELECT [union] FROM CreditUnions', 10))
+				.toBe('SELECT TOP 10 [union] FROM CreditUnions');
+		});
+
+		it('should not modify UNION queries that already have TOP', () => {
+			const query = 'SELECT TOP 5 a FROM t1 UNION SELECT TOP 5 a FROM t2';
+			expect(QueryValidator.addRowLimit(query, 100)).toBe(query);
 		});
 	});
 });
