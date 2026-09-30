@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { config as loadEnv } from 'dotenv';
-loadEnv({ quiet: true });
-
+import { existsSync } from 'fs';
+import { resolve } from 'path';
 import { createRequire } from 'module';
 import { Command } from 'commander';
 import { ConnectionConfigSchema } from './types.js';
@@ -27,6 +27,37 @@ const { version } = require('../package.json') as { version: string };
 
 let connectionManager: ConnectionManager | undefined;
 let context: CliContext | undefined;
+let loadedEnvFile: string | undefined;
+
+const ENV_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * A named environment loads only `.env.<name>`, never `.env` as well. Layering
+ * them would let a missing key in `.env.test` silently fall back to whatever
+ * server `.env` points at, which may be production. The named file also wins
+ * over variables already set in the shell, because naming it is an explicit
+ * choice; CLI flags still win over both.
+ */
+function loadEnvironment(envName: string | undefined): void {
+	if (envName === undefined) {
+		const path = resolve('.env');
+		loadEnv({ path, quiet: true });
+		loadedEnvFile = existsSync(path) ? path : undefined;
+		return;
+	}
+
+	if (!ENV_NAME_PATTERN.test(envName)) {
+		throw new Error(`Invalid environment name "${envName}": use letters, digits, "-" or "_"`);
+	}
+
+	const path = resolve(`.env.${envName}`);
+	if (!existsSync(path)) {
+		throw new Error(`Environment file not found: ${path}`);
+	}
+
+	loadEnv({ path, override: true, quiet: true });
+	loadedEnvFile = path;
+}
 
 function buildConfig(opts: GlobalOptions): Record<string, unknown> {
 	return {
@@ -66,6 +97,7 @@ function initializeTools(cm: ConnectionManager, maxRows: number): Map<string, Ba
 }
 
 interface GlobalOptions {
+	env?: string;
 	json?: boolean;
 	plain?: boolean;
 	database?: string;
@@ -124,6 +156,7 @@ async function main(): Promise<void> {
 		.name('sqlq')
 		.description('Read-only SQL Server CLI - explore databases, tables, schemas, and run queries')
 		.version(version)
+		.option('-e, --env <name>', 'Load connection settings from .env.<name> instead of .env')
 		.option('--json', 'Output raw JSON to stdout')
 		.option('--plain', 'Plain text output, no tables or colors')
 		.option('-d, --database <name>', 'Target database')
@@ -164,6 +197,7 @@ async function main(): Promise<void> {
 			const mode = getOutputMode(globalOpts);
 
 			const configData = {
+				envFile: loadedEnvFile ?? '(none)',
 				server: rawConfig.server,
 				port: rawConfig.port,
 				database: rawConfig.database ?? '(default)',
@@ -215,8 +249,24 @@ async function main(): Promise<void> {
 	});
 
 	program.hook('preAction', async (thisCommand, actionCommand) => {
-		if (actionCommand.name() === 'config') return;
 		const opts = thisCommand.opts<GlobalOptions>();
+
+		try {
+			loadEnvironment(opts.env);
+		} catch (error) {
+			outputError({
+				error: error instanceof Error ? error.message : String(error),
+				code: 'VALIDATION_ERROR',
+				suggestions: [
+					'Create the file .env.<name> in the current directory, for example .env.test',
+					'Run without --env to use .env',
+				],
+			}, getOutputMode(opts));
+			process.exitCode = 1;
+			throw error;
+		}
+
+		if (actionCommand.name() === 'config') return;
 
 		if (opts.passwordStdin) {
 			opts.password = await readPasswordFromStdin();

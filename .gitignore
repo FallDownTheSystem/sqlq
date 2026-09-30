@@ -10,10 +10,8 @@ build/
 
 # Environment variables - IMPORTANT: Never commit credentials!
 .env
-.env.local
-.env.production
-.env.staging
-.env.test
+.env.*
+!.env.example
 
 # Database connection files
 config/database.json
@@ -98,10 +96,6 @@ jspm_packages/
 
 # Yarn Integrity file
 .yarn-integrity
-
-# dotenv environment variables file
-.env
-.env.test
 
 # parcel-bundler cache
 .cache

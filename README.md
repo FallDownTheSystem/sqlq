@@ -40,6 +40,19 @@ You can also set these optional variables:
 
 `sqlq` also reads a `.env` file from the current working directory.
 
+### Multiple servers
+
+Put each server's settings in its own `.env.<name>` file and pick one with `-e/--env`:
+
+```bash
+# .env.test, .env.release, .env.production, ...
+sqlq --env test tables
+sqlq -e production query "SELECT TOP 10 * FROM dbo.Orders"
+sqlq -e release config      # Show which file and settings were used
+```
+
+With `--env`, `sqlq` reads only `.env.<name>`. It does not fall back to `.env` for missing keys, so a partial file cannot quietly connect to the wrong server. Values in the named file take precedence over `SQLSERVER_*` variables already set in your shell. CLI flags still take precedence over both. If the file does not exist, `sqlq` exits with an error.
+
 ## Usage
 
 ```bash
@@ -79,6 +92,7 @@ When stdout isn't a TTY (piped or redirected), it automatically falls back to pl
 ### Global Flags
 
 ```
+-e, --env <name>         Load settings from .env.<name> instead of .env
 -d, --database <name>    Target database
 --host <host>            Override SQLSERVER_HOST
 --user <user>            Override SQLSERVER_USER
