@@ -1,7 +1,9 @@
 import { ConnectionManager } from '../connection-manager.js';
 import { QueryValidator } from '../security.js';
 import { ErrorHandler } from '../errors.js';
-import { QueryParam } from '../types.js';
+import { ObjectType, QueryParam, ResolvedObject } from '../types.js';
+import type { ObjectReference } from '../validation.js';
+import { resolveObject } from './objects.js';
 
 export abstract class BaseTool {
 	protected connectionManager: ConnectionManager;
@@ -58,6 +60,15 @@ export abstract class BaseTool {
 		} catch (error) {
 			throw ErrorHandler.handleSqlServerError(error);
 		}
+	}
+
+	protected async resolveObject(ref: ObjectReference, allowed: readonly ObjectType[], command: string): Promise<ResolvedObject> {
+		return resolveObject(
+			<T>(query: string, params: QueryParam[]) => this.executeSafeQueryWithParams<T>(query, params, ref.database),
+			ref,
+			allowed,
+			command,
+		);
 	}
 
 	abstract getName(): string;

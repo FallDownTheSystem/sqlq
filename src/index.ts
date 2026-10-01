@@ -17,6 +17,10 @@ import {
 	GetServerInfoTool,
 	GetTableStatsTool,
 	TestConnectionTool,
+	FindObjectsTool,
+	GetIndexesTool,
+	GetDefinitionTool,
+	ListRoutinesTool,
 } from './tools/index.js';
 import { registerCommands, type CliContext } from './cli/commands.js';
 import { getOutputMode, outputError, outputJson, outputPlain, heading, field } from './cli/output.js';
@@ -86,6 +90,10 @@ function initializeTools(cm: ConnectionManager, maxRows: number): Map<string, Ba
 		GetForeignKeysTool,
 		GetServerInfoTool,
 		GetTableStatsTool,
+		FindObjectsTool,
+		GetIndexesTool,
+		GetDefinitionTool,
+		ListRoutinesTool,
 	];
 
 	for (const ToolClass of toolClasses) {

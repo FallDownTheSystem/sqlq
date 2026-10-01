@@ -17,12 +17,11 @@ export class GetTableStatsTool extends BaseTool {
 			properties: {
 				table_name: {
 					type: 'string',
-					description: 'Name of the table to get stats for (optional - if not provided, returns stats for all tables)',
+					description: 'Table name: name, schema.name or database.schema.name (optional - if not provided, returns stats for all tables)',
 				},
 				schema: {
 					type: 'string',
-					description: 'Schema name (optional, defaults to dbo)',
-					default: 'dbo',
+					description: 'Schema name (optional; with a table it qualifies the table, without one it filters the tables)',
 				},
 				database: {
 					type: 'string',
@@ -34,12 +33,8 @@ export class GetTableStatsTool extends BaseTool {
 	}
 
 	async execute(params: { table_name?: string; schema?: string; database?: string }): Promise<TableStats[]> {
-		const database = params.database ? ParameterValidator.validateDatabaseName(params.database) : undefined;
-		const validatedParams = ParameterValidator.validateForeignKeyParameters({
-			...params,
-			schema: params.schema ?? 'dbo',
-		});
-		const { table_name, schema } = validatedParams;
+		const ref = params.table_name ? ParameterValidator.parseObjectName(params.table_name, params) : undefined;
+		const database = ref?.database ?? (params.database ? ParameterValidator.validateDatabaseName(params.database) : undefined);
 
 		const queryParams: QueryParam[] = [];
 
@@ -61,20 +56,13 @@ export class GetTableStatsTool extends BaseTool {
 				AND i.object_id > 255
 		`;
 
-		const conditions: string[] = [];
-
-		if (table_name) {
-			conditions.push(`t.name = @tableName`);
-			queryParams.push({ name: 'tableName', value: table_name });
-		}
-
-		if (schema && table_name) {
-			conditions.push(`s.name = @schema`);
-			queryParams.push({ name: 'schema', value: schema });
-		}
-
-		if (conditions.length > 0) {
-			query += ` AND ${conditions.join(' AND ')}`;
+		if (ref) {
+			const object = await this.resolveObject(ref, ['table'], 'stats');
+			query += ' AND t.object_id = @objectId';
+			queryParams.push({ name: 'objectId', value: object.object_id });
+		} else if (params.schema) {
+			query += ' AND s.name = @schema';
+			queryParams.push({ name: 'schema', value: ParameterValidator.validateSchemaName(params.schema) });
 		}
 
 		query += `

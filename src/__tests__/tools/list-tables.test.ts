@@ -53,8 +53,12 @@ describe('ListTablesTool', () => {
 		expect(params).toEqual([{ name: 'schema', value: 'dbo' }]);
 	});
 
-	it('should reject invalid schema names', async () => {
-		await expect(tool.execute({ schema: 'SELECT' })).rejects.toThrow();
+	it('should bind schema names that are keywords as parameters', async () => {
+		await tool.execute({ schema: 'user' });
+
+		const [queryText, params] = mockQueryWithParams.mock.calls[0];
+		expect(queryText).toContain('TABLE_SCHEMA = @schema');
+		expect(params).toEqual([{ name: 'schema', value: 'user' }]);
 	});
 
 	it('should have valid input schema', () => {

@@ -29,21 +29,38 @@ export interface TableInfo {
   table_type: string;
 }
 
+export type ObjectType =
+  | 'table'
+  | 'view'
+  | 'procedure'
+  | 'scalar function'
+  | 'table function'
+  | 'trigger'
+  | 'synonym';
+
+export interface ResolvedObject {
+  object_id: number;
+  schema: string;
+  name: string;
+  type: ObjectType;
+}
+
 export interface ColumnInfo {
-  table_catalog: string;
   table_schema: string;
   table_name: string;
-  column_name: string;
   ordinal_position: number;
-  column_default: string | null;
-  is_nullable: string;
+  column_name: string;
+  /** Full declared type, e.g. nvarchar(50), decimal(18,2), varchar(max). */
   data_type: string;
-  character_maximum_length: number | null;
-  character_octet_length: number | null;
-  numeric_precision: number | null;
-  numeric_precision_radix: number | null;
-  numeric_scale: number | null;
-  datetime_precision: number | null;
+  is_nullable: boolean;
+  column_default: string | null;
+  is_identity: boolean;
+  is_computed: boolean;
+  computed_definition: string | null;
+  /** Position within the primary key, or null when not part of it. */
+  primary_key_ordinal: number | null;
+  /** Referenced column as schema.table.column when the column is a foreign key. */
+  references: string | null;
 }
 
 export interface ForeignKeyInfo {
@@ -60,10 +77,37 @@ export interface IndexInfo {
   table_schema: string;
   table_name: string;
   index_name: string;
-  column_name: string;
   index_type: string;
   is_unique: boolean;
   is_primary_key: boolean;
+  is_unique_constraint: boolean;
+  /** Key columns in key order; descending keys carry a " DESC" suffix. */
+  key_columns: string[];
+  included_columns: string[];
+  filter_definition: string | null;
+}
+
+export interface RoutineInfo {
+  routine_schema: string;
+  routine_name: string;
+  routine_type: ObjectType;
+  modify_date: Date;
+}
+
+export interface ObjectDefinition {
+  schema: string;
+  name: string;
+  type: ObjectType;
+  definition: string;
+}
+
+export interface FindMatch {
+  schema: string;
+  object_name: string;
+  object_type: ObjectType;
+  /** Set when the match is a column of the object rather than the object itself. */
+  column_name: string | null;
+  data_type: string | null;
 }
 
 export interface ViewInfo {
@@ -73,15 +117,6 @@ export interface ViewInfo {
   view_definition: string;
   check_option: string | null;
   is_updatable: string;
-}
-
-export interface ProcedureInfo {
-  routine_catalog: string;
-  routine_schema: string;
-  routine_name: string;
-  routine_type: string;
-  data_type: string | null;
-  routine_definition: string | null;
 }
 
 export interface DatabaseInfo {

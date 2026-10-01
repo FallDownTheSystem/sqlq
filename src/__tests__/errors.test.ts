@@ -6,6 +6,7 @@ import {
 	QueryError,
 	TimeoutError,
 	PermissionError,
+	NotFoundError,
 	ErrorHandler,
 } from '../errors.js';
 
@@ -222,5 +223,18 @@ describe('ErrorHandler.formatErrorForUser', () => {
 		const err = new SqlqError('unknown', 'UNKNOWN_ERROR');
 		const result = ErrorHandler.formatErrorForUser(err);
 		expect(result.suggestions).toEqual([]);
+	});
+
+	it('should prefer the suggestions an error carries', () => {
+		const err = new NotFoundError('No tables named X', ['sqlq find X']);
+		const result = ErrorHandler.formatErrorForUser(err);
+		expect(result).toEqual({ error: 'No tables named X', code: 'NOT_FOUND', suggestions: ['sqlq find X'] });
+	});
+});
+
+describe('ErrorHandler.handleSqlServerError with sqlq errors', () => {
+	it('should pass errors raised by sqlq through unchanged', () => {
+		const err = new NotFoundError('No tables named X', []);
+		expect(ErrorHandler.handleSqlServerError(err)).toBe(err);
 	});
 });

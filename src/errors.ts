@@ -2,10 +2,18 @@ export class SqlqError extends Error {
   constructor(
     message: string,
     public readonly code: string,
-    public readonly details?: any
+    public readonly details?: any,
+    public readonly suggestions?: string[]
   ) {
     super(message);
     this.name = 'SqlqError';
+  }
+}
+
+export class NotFoundError extends SqlqError {
+  constructor(message: string, suggestions: string[]) {
+    super(message, 'NOT_FOUND', undefined, suggestions);
+    this.name = 'NotFoundError';
   }
 }
 
@@ -17,8 +25,8 @@ export class ConnectionError extends SqlqError {
 }
 
 export class ValidationError extends SqlqError {
-  constructor(message: string, details?: any) {
-    super(message, 'VALIDATION_ERROR', details);
+  constructor(message: string, details?: any, suggestions?: string[]) {
+    super(message, 'VALIDATION_ERROR', details, suggestions);
     this.name = 'ValidationError';
   }
 }
@@ -55,6 +63,12 @@ export class ErrorHandler {
   static handleSqlServerError(error: any): SqlqError {
     if (!error) {
       return new SqlqError('Unknown database error occurred', 'UNKNOWN_ERROR');
+    }
+
+    // Errors raised by sqlq itself are already classified; re-wrapping them
+    // would turn a precise message into a generic "operation failed".
+    if (error instanceof SqlqError) {
+      return error;
     }
 
     const message = error.message || error.toString();
@@ -184,6 +198,11 @@ export class ErrorHandler {
       code: error.code,
       suggestions: [] as string[],
     };
+
+    if (error.suggestions) {
+      result.suggestions = error.suggestions;
+      return result;
+    }
 
     // Add helpful suggestions based on error type
     switch (error.code) {

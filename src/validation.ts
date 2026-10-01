@@ -1,19 +1,23 @@
 import { z } from 'zod';
+import { ValidationError } from './errors.js';
+
+export interface ObjectReference {
+  name: string;
+  schema?: string;
+  database?: string;
+}
 
 export class ParameterValidator {
-  // Schema name validation - SQL Server identifier rules
+  // Schema and object names are only ever bound as query parameters, never
+  // interpolated, so any name SQL Server accepts (Order, my-table, "Sales Data")
+  // must be accepted here too. Only the sysname length limit applies.
   private static schemaNameSchema = z.string()
     .min(1, 'Schema name cannot be empty')
-    .max(128, 'Schema name cannot exceed 128 characters')
-    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, 'Schema name must start with letter or underscore and contain only letters, numbers, and underscores')
-    .refine(name => !this.isReservedWord(name), 'Schema name cannot be a reserved word');
+    .max(128, 'Schema name cannot exceed 128 characters');
 
-  // Table name validation
   private static tableNameSchema = z.string()
-    .min(1, 'Table name cannot be empty')
-    .max(128, 'Table name cannot exceed 128 characters')
-    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, 'Table name must start with letter or underscore and contain only letters, numbers, and underscores')
-    .refine(name => !this.isReservedWord(name), 'Table name cannot be a reserved word');
+    .min(1, 'Object name cannot be empty')
+    .max(128, 'Object name cannot exceed 128 characters');
 
   // Column name validation
   private static columnNameSchema = z.string()
@@ -116,37 +120,77 @@ export class ParameterValidator {
     };
   }
 
-  // Validate table description parameters
-  static validateTableDescriptionParameters(params: { table_name?: string; schema?: string }): {
-    table_name: string;
-    schema: string;
-  } {
-    if (!params.table_name) {
-      throw new Error('table_name parameter is required');
+  /**
+   * Parses an object reference as written in T-SQL: `name`, `schema.name` or
+   * `database.schema.name`, each part optionally quoted with [] or "".
+   * Separate `schema` / `database` options are accepted too, but must not
+   * contradict the qualified name.
+   */
+  static parseObjectName(input: string, options: { schema?: string | undefined; database?: string | undefined } = {}): ObjectReference {
+    if (!input || !input.trim()) {
+      throw new ValidationError('Object name cannot be empty');
     }
 
-    return {
-      table_name: this.validateTableName(params.table_name),
-      schema: params.schema ? this.validateSchemaName(params.schema) : 'dbo',
-    };
+    const parts = this.splitQualifiedName(input.trim());
+    if (parts.length > 3 || parts.some(part => part.length === 0)) {
+      throw new ValidationError(`Invalid object name "${input}"`, undefined, [
+        'Use name, schema.name or database.schema.name',
+        'Quote names that contain dots: [My.Table]',
+      ]);
+    }
+
+    const name = parts[parts.length - 1]!;
+    const qualifiedSchema = parts.length >= 2 ? parts[parts.length - 2] : undefined;
+    const qualifiedDatabase = parts.length === 3 ? parts[0] : undefined;
+
+    const schema = this.pickConsistent('schema', qualifiedSchema, options.schema);
+    const database = this.pickConsistent('database', qualifiedDatabase, options.database);
+
+    const result: ObjectReference = { name: this.validateTableName(name) };
+    if (schema) result.schema = this.validateSchemaName(schema);
+    if (database) result.database = this.validateDatabaseName(database);
+    return result;
   }
 
-  // Validate foreign key parameters
-  static validateForeignKeyParameters(params: { table_name?: string; schema?: string }): {
-    table_name?: string;
-    schema?: string;
-  } {
-    const result: { table_name?: string; schema?: string } = {};
-
-    if (params.schema) {
-      result.schema = this.validateSchemaName(params.schema);
+  private static pickConsistent(label: string, qualified: string | undefined, option: string | undefined): string | undefined {
+    if (qualified && option && qualified.toLowerCase() !== option.toLowerCase()) {
+      throw new ValidationError(`The name says ${label} "${qualified}" but the ${label} option says "${option}"`);
     }
+    return qualified ?? option;
+  }
 
-    if (params.table_name) {
-      result.table_name = this.validateTableName(params.table_name);
+  private static splitQualifiedName(input: string): string[] {
+    const parts: string[] = [];
+    let current = '';
+    let i = 0;
+    while (i < input.length) {
+      const ch = input[i]!;
+      if (ch === '[' || ch === '"') {
+        const close = ch === '[' ? ']' : '"';
+        i++;
+        while (i < input.length) {
+          if (input[i] === close) {
+            // A doubled closing character is an escaped literal inside the quotes.
+            if (input[i + 1] === close) { current += close; i += 2; continue; }
+            i++;
+            break;
+          }
+          current += input[i];
+          i++;
+        }
+        continue;
+      }
+      if (ch === '.') {
+        parts.push(current.trim());
+        current = '';
+        i++;
+        continue;
+      }
+      current += ch;
+      i++;
     }
-
-    return result;
+    parts.push(current.trim());
+    return parts;
   }
 
   // Validate list tables parameters

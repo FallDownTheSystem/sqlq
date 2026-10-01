@@ -66,8 +66,12 @@ sqlq --host myserver --user sa --password secret -d mydb <command>
 sqlq databases              # List all databases (alias: dbs)
 sqlq tables                 # List tables (-s to filter by schema)
 sqlq views                  # List views (-s to filter by schema)
-sqlq describe <table>       # Show column details for a table
-sqlq foreign-keys [table]   # Show foreign key relationships (alias: fk)
+sqlq routines               # List procedures and functions (alias: procs)
+sqlq find <pattern>         # Find tables, views, routines and columns by name (alias: search)
+sqlq describe <object>      # Columns: types, primary key, identity, defaults, references (aliases: columns, cols, desc)
+sqlq indexes <table>        # Indexes with key and included columns (alias: idx)
+sqlq definition <object>    # SQL source of a view, procedure, function or trigger (aliases: def, source)
+sqlq foreign-keys [table]   # Foreign keys from and to a table, or all of them (alias: fk)
 sqlq stats [table]          # Row counts and table sizes
 sqlq server-info            # Server version and edition (alias: info)
 sqlq test                   # Test your connection
@@ -77,6 +81,10 @@ sqlq config                 # Show resolved connection config
 ```
 
 Every command accepts an optional `-d/--database` flag to target a specific database without changing your connection config.
+
+Commands that take an object accept `name`, `schema.name` or `database.schema.name`, with `[...]` quoting for unusual names. Without a schema, `sqlq` searches every schema. A name that exists in several schemas is an error that lists the qualified names. An unknown name is an error that lists close matches.
+
+`find` matches the text anywhere in a name. Use `*` and `?` for a wildcard pattern instead, and `-k table,view,routine,trigger,synonym,column` to limit what it searches.
 
 ### Output Formats
 
@@ -113,8 +121,11 @@ When stdout isn't a TTY (piped or redirected), it automatically falls back to pl
 # List tables in the dbo schema
 sqlq -d AdventureWorks tables -s dbo
 
-# Describe a table
-sqlq -d AdventureWorks describe Product
+# Find everything named like "product", then inspect it
+sqlq -d AdventureWorks find product
+sqlq -d AdventureWorks describe Production.Product
+sqlq -d AdventureWorks fk Production.Product
+sqlq -d AdventureWorks definition Production.vProductAndDescription
 
 # Run a query and pipe to jq
 sqlq -d AdventureWorks query "SELECT TOP 5 Name, ListPrice FROM Production.Product" --json | jq '.rows'

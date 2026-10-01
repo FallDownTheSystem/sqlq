@@ -8,7 +8,7 @@ export class GetForeignKeysTool extends BaseTool {
 	}
 
 	getDescription(): string {
-		return 'Get foreign key relationships for a table or entire database';
+		return 'Get foreign key relationships for a table (outgoing and incoming) or for the entire database';
 	}
 
 	getInputSchema(): any {
@@ -17,12 +17,11 @@ export class GetForeignKeysTool extends BaseTool {
 			properties: {
 				table_name: {
 					type: 'string',
-					description: 'Name of the table to get foreign keys for (optional - if not provided, returns all foreign keys)',
+					description: 'Table name: name, schema.name or database.schema.name (optional - if not provided, returns all foreign keys)',
 				},
 				schema: {
 					type: 'string',
-					description: 'Schema name (optional, defaults to dbo)',
-					default: 'dbo',
+					description: 'Schema name (optional; with a table it qualifies the table, without one it filters the referencing tables)',
 				},
 				database: {
 					type: 'string',
@@ -34,12 +33,8 @@ export class GetForeignKeysTool extends BaseTool {
 	}
 
 	async execute(params: { table_name?: string; schema?: string; database?: string }): Promise<ForeignKeyInfo[]> {
-		const database = params.database ? ParameterValidator.validateDatabaseName(params.database) : undefined;
-		const validatedParams = ParameterValidator.validateForeignKeyParameters({
-			...params,
-			schema: params.schema ?? 'dbo',
-		});
-		const { table_name, schema } = validatedParams;
+		const ref = params.table_name ? ParameterValidator.parseObjectName(params.table_name, params) : undefined;
+		const database = ref?.database ?? (params.database ? ParameterValidator.validateDatabaseName(params.database) : undefined);
 
 		const queryParams: QueryParam[] = [];
 
@@ -57,23 +52,17 @@ export class GetForeignKeysTool extends BaseTool {
 				ON fk.object_id = fkc.constraint_object_id
 		`;
 
-		const conditions: string[] = [];
-
-		if (table_name) {
-			conditions.push(`OBJECT_NAME(fk.parent_object_id) = @tableName`);
-			queryParams.push({ name: 'tableName', value: table_name });
+		if (ref) {
+			// Both directions: what this table points to, and what points at it.
+			const object = await this.resolveObject(ref, ['table'], 'foreign-keys');
+			query += ' WHERE (fk.parent_object_id = @objectId OR fk.referenced_object_id = @objectId)';
+			queryParams.push({ name: 'objectId', value: object.object_id });
+		} else if (params.schema) {
+			query += ' WHERE OBJECT_SCHEMA_NAME(fk.parent_object_id) = @schema';
+			queryParams.push({ name: 'schema', value: ParameterValidator.validateSchemaName(params.schema) });
 		}
 
-		if (schema && table_name) {
-			conditions.push(`OBJECT_SCHEMA_NAME(fk.parent_object_id) = @schema`);
-			queryParams.push({ name: 'schema', value: schema });
-		}
-
-		if (conditions.length > 0) {
-			query += ` WHERE ${conditions.join(' AND ')}`;
-		}
-
-		query += ' ORDER BY table_schema, table_name, constraint_name';
+		query += ' ORDER BY table_schema, table_name, constraint_name, fkc.constraint_column_id';
 
 		return await this.executeSafeQueryWithParams<ForeignKeyInfo>(query, queryParams, database);
 	}

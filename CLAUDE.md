@@ -59,5 +59,6 @@ Any of these can be overridden by CLI flags (`--host`, `--user`, `--password`, `
 
 - Strict TypeScript (`noUnusedLocals`, `noUnusedParameters`, `exactOptionalPropertyTypes`, `noImplicitReturns`)
 - Tool names use snake_case (`list_tables`, `execute_query`) — these are the keys in the tool map, not user-facing names
-- SQL queries in tools use `INFORMATION_SCHEMA` views for metadata
+- Tools that take an object name parse it with `ParameterValidator.parseObjectName()` (`name`, `schema.name`, `db.schema.name`) and resolve it with `BaseTool.resolveObject()` (`src/tools/objects.ts`), which searches all schemas and throws errors that list alternatives and close matches. Metadata queries then filter by `object_id` against `sys.*` catalog views
+- Object and schema names are always bound as query parameters, so validation only checks length; never interpolate them
 - Identifiers are bracket-escaped (`[name]`) before interpolation into SQL

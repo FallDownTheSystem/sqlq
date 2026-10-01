@@ -1,5 +1,19 @@
 import { table, heading, field, divider, outputPlain, outputTable, type OutputMode } from './output.js';
-import type { TableInfo, ColumnInfo, ForeignKeyInfo, ViewInfo, DatabaseInfo, ServerInfo, QueryResult, TableStats } from '../types.js';
+import type {
+	TableInfo,
+	ColumnInfo,
+	ForeignKeyInfo,
+	ViewInfo,
+	DatabaseInfo,
+	ServerInfo,
+	QueryResult,
+	TableStats,
+	FindMatch,
+	IndexInfo,
+	ObjectDefinition,
+	RoutineInfo,
+} from '../types.js';
+import { qualifiedName } from '../tools/objects.js';
 
 interface ConnectionTestResult {
 	isConnected: boolean;
@@ -98,6 +112,13 @@ export function formatViews(data: ViewInfo[], mode: OutputMode): void {
 	outputTable(table(['Schema', 'View', 'Updatable', 'Check Option'], rows));
 }
 
+function keyFlags(c: ColumnInfo, compositeKey: boolean): string[] {
+	const flags: string[] = [];
+	if (c.primary_key_ordinal !== null) flags.push(compositeKey ? `PK(${c.primary_key_ordinal})` : 'PK');
+	if (c.is_identity) flags.push('IDENTITY');
+	return flags;
+}
+
 export function formatDescribe(data: ColumnInfo[], mode: OutputMode): void {
 	if (data.length === 0) {
 		if (mode === 'plain') { outputPlain('No columns found.'); }
@@ -105,19 +126,116 @@ export function formatDescribe(data: ColumnInfo[], mode: OutputMode): void {
 		return;
 	}
 
+	const compositeKey = data.filter(c => c.primary_key_ordinal !== null).length > 1;
+
 	if (mode === 'plain') {
 		for (const c of data) {
-			const type = c.character_maximum_length ? `${c.data_type}(${c.character_maximum_length})` : c.data_type;
-			outputPlain(`${c.column_name}\t${type}\t${c.is_nullable}\t${c.column_default ?? ''}`);
+			const flags = keyFlags(c, compositeKey);
+			if (c.computed_definition) flags.push(`AS ${c.computed_definition}`);
+			if (c.column_default) flags.push(`DEFAULT ${c.column_default}`);
+			if (c.references) flags.push(`-> ${c.references}`);
+			const nullability = c.is_nullable ? 'NULL' : 'NOT NULL';
+			outputPlain([c.column_name, c.data_type, nullability, ...(flags.length ? [flags.join(' ')] : [])].join('\t'));
 		}
 		return;
 	}
 
-	const rows = data.map(c => {
-		const type = c.character_maximum_length ? `${c.data_type}(${c.character_maximum_length})` : c.data_type;
-		return [String(c.ordinal_position), c.column_name, type, c.is_nullable, c.column_default ?? ''];
-	});
-	outputTable(table(['#', 'Column', 'Type', 'Nullable', 'Default'], rows));
+	heading(qualifiedName(data[0]!.table_schema, data[0]!.table_name));
+	const rows = data.map(c => [
+		String(c.ordinal_position),
+		c.column_name,
+		c.data_type,
+		c.is_nullable ? 'Yes' : 'No',
+		keyFlags(c, compositeKey).join(' '),
+		c.computed_definition ? `AS ${c.computed_definition}` : c.column_default ?? '',
+		c.references ?? '',
+	]);
+	outputTable(table(['#', 'Column', 'Type', 'Nullable', 'Key', 'Default / Computed', 'References'], rows));
+}
+
+export function formatFind(data: FindMatch[], mode: OutputMode): void {
+	if (data.length === 0) {
+		if (mode === 'plain') { outputPlain('No matches found.'); }
+		else { heading('No matches found.'); }
+		return;
+	}
+
+	if (mode === 'plain') {
+		for (const m of data) {
+			const name = qualifiedName(m.schema, m.object_name);
+			if (m.column_name) {
+				outputPlain(`${name}.${m.column_name}\tcolumn (${m.object_type})\t${m.data_type ?? ''}`);
+			} else {
+				outputPlain(`${name}\t${m.object_type}`);
+			}
+		}
+		return;
+	}
+
+	const rows = data.map(m => [m.schema, m.object_name, m.object_type, m.column_name ?? '', m.data_type ?? '']);
+	outputTable(table(['Schema', 'Object', 'Type', 'Column', 'Column Type'], rows));
+}
+
+function indexKind(i: IndexInfo): string {
+	const words = [i.index_type];
+	if (i.is_primary_key) words.push('PRIMARY KEY');
+	else if (i.is_unique_constraint) words.push('UNIQUE CONSTRAINT');
+	else if (i.is_unique) words.push('UNIQUE');
+	return words.join(' ');
+}
+
+export function formatIndexes(data: IndexInfo[], mode: OutputMode): void {
+	if (data.length === 0) {
+		if (mode === 'plain') { outputPlain('No indexes found.'); }
+		else { heading('No indexes found.'); }
+		return;
+	}
+
+	if (mode === 'plain') {
+		for (const i of data) {
+			const parts = [i.index_name, indexKind(i), i.key_columns.join(', ')];
+			if (i.included_columns.length) parts.push(`INCLUDE (${i.included_columns.join(', ')})`);
+			if (i.filter_definition) parts.push(`WHERE ${i.filter_definition}`);
+			outputPlain(parts.join('\t'));
+		}
+		return;
+	}
+
+	heading(qualifiedName(data[0]!.table_schema, data[0]!.table_name));
+	const rows = data.map(i => [
+		i.index_name,
+		indexKind(i),
+		i.key_columns.join(', '),
+		i.included_columns.join(', '),
+		i.filter_definition ?? '',
+	]);
+	outputTable(table(['Index', 'Type', 'Key Columns', 'Included', 'Filter'], rows));
+}
+
+export function formatDefinition(data: ObjectDefinition, mode: OutputMode): void {
+	if (mode === 'rich') {
+		heading(`${qualifiedName(data.schema, data.name)} (${data.type})`);
+		process.stdout.write('\n');
+	}
+	outputPlain(data.definition);
+}
+
+export function formatRoutines(data: RoutineInfo[], mode: OutputMode): void {
+	if (data.length === 0) {
+		if (mode === 'plain') { outputPlain('No routines found.'); }
+		else { heading('No routines found.'); }
+		return;
+	}
+
+	if (mode === 'plain') {
+		for (const r of data) {
+			outputPlain(`${qualifiedName(r.routine_schema, r.routine_name)}\t${r.routine_type}`);
+		}
+		return;
+	}
+
+	const rows = data.map(r => [r.routine_schema, r.routine_name, r.routine_type, new Date(r.modify_date).toISOString().slice(0, 10)]);
+	outputTable(table(['Schema', 'Name', 'Type', 'Modified'], rows));
 }
 
 export function formatQuery(data: QueryResult, mode: OutputMode): void {

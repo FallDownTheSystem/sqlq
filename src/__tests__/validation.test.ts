@@ -46,24 +46,16 @@ describe('ParameterValidator', () => {
 			expect(ParameterValidator.validateTableName('_private')).toBe('_private');
 		});
 
-		it('should reject names starting with a digit', () => {
-			expect(() => ParameterValidator.validateTableName('1table')).toThrow();
-		});
-
-		it('should reject names with special characters', () => {
-			expect(() => ParameterValidator.validateTableName('my-table')).toThrow();
-			expect(() => ParameterValidator.validateTableName('my table')).toThrow();
-			expect(() => ParameterValidator.validateTableName('my.table')).toThrow();
+		it('should accept any name SQL Server accepts, since names are bound as parameters', () => {
+			expect(ParameterValidator.validateTableName('1table')).toBe('1table');
+			expect(ParameterValidator.validateTableName('my-table')).toBe('my-table');
+			expect(ParameterValidator.validateTableName('my table')).toBe('my table');
+			expect(ParameterValidator.validateTableName('Order')).toBe('Order');
+			expect(ParameterValidator.validateTableName('User')).toBe('User');
 		});
 
 		it('should reject empty names', () => {
 			expect(() => ParameterValidator.validateTableName('')).toThrow();
-		});
-
-		it('should reject reserved words', () => {
-			expect(() => ParameterValidator.validateTableName('SELECT')).toThrow();
-			expect(() => ParameterValidator.validateTableName('TABLE')).toThrow();
-			expect(() => ParameterValidator.validateTableName('select')).toThrow();
 		});
 
 		it('should reject names exceeding 128 characters', () => {
@@ -77,12 +69,13 @@ describe('ParameterValidator', () => {
 			expect(ParameterValidator.validateSchemaName('sales')).toBe('sales');
 		});
 
-		it('should reject reserved words', () => {
-			expect(() => ParameterValidator.validateSchemaName('SELECT')).toThrow();
+		it('should accept names that are keywords or contain punctuation', () => {
+			expect(ParameterValidator.validateSchemaName('user')).toBe('user');
+			expect(ParameterValidator.validateSchemaName('my-schema')).toBe('my-schema');
 		});
 
-		it('should reject invalid characters', () => {
-			expect(() => ParameterValidator.validateSchemaName('my-schema')).toThrow();
+		it('should reject empty names', () => {
+			expect(() => ParameterValidator.validateSchemaName('')).toThrow();
 		});
 	});
 
@@ -162,41 +155,43 @@ describe('ParameterValidator', () => {
 		});
 	});
 
-	describe('validateTableDescriptionParameters', () => {
-		it('should validate with defaults', () => {
-			const result = ParameterValidator.validateTableDescriptionParameters({ table_name: 'Users' });
-			expect(result.table_name).toBe('Users');
-			expect(result.schema).toBe('dbo');
+	describe('parseObjectName', () => {
+		it('should leave the schema open for an unqualified name', () => {
+			expect(ParameterValidator.parseObjectName('Users')).toEqual({ name: 'Users' });
 		});
 
-		it('should accept custom schema', () => {
-			const result = ParameterValidator.validateTableDescriptionParameters({ table_name: 'Users', schema: 'sales' });
-			expect(result.schema).toBe('sales');
+		it('should split schema.name', () => {
+			expect(ParameterValidator.parseObjectName('sales.Orders')).toEqual({ schema: 'sales', name: 'Orders' });
 		});
 
-		it('should reject missing table_name', () => {
-			expect(() => ParameterValidator.validateTableDescriptionParameters({})).toThrow('table_name parameter is required');
-		});
-	});
-
-	describe('validateForeignKeyParameters', () => {
-		it('should accept empty params', () => {
-			const result = ParameterValidator.validateForeignKeyParameters({});
-			expect(result).toEqual({});
+		it('should split database.schema.name', () => {
+			expect(ParameterValidator.parseObjectName('Shop.sales.Orders')).toEqual({ database: 'Shop', schema: 'sales', name: 'Orders' });
 		});
 
-		it('should validate schema when provided', () => {
-			const result = ParameterValidator.validateForeignKeyParameters({ schema: 'dbo' });
-			expect(result.schema).toBe('dbo');
+		it('should honour [] and "" quoting, including dots and escaped brackets', () => {
+			expect(ParameterValidator.parseObjectName('[my schema].[Order.Lines]')).toEqual({ schema: 'my schema', name: 'Order.Lines' });
+			expect(ParameterValidator.parseObjectName('"dbo"."a]]b"')).toEqual({ schema: 'dbo', name: 'a]]b' });
+			expect(ParameterValidator.parseObjectName('[a]]b]')).toEqual({ name: 'a]b' });
 		});
 
-		it('should validate table_name when provided', () => {
-			const result = ParameterValidator.validateForeignKeyParameters({ table_name: 'Users' });
-			expect(result.table_name).toBe('Users');
+		it('should take schema and database from options', () => {
+			expect(ParameterValidator.parseObjectName('Orders', { schema: 'sales', database: 'Shop' }))
+				.toEqual({ database: 'Shop', schema: 'sales', name: 'Orders' });
 		});
 
-		it('should reject invalid schema', () => {
-			expect(() => ParameterValidator.validateForeignKeyParameters({ schema: 'SELECT' })).toThrow();
+		it('should accept options that agree with the qualified name', () => {
+			expect(ParameterValidator.parseObjectName('sales.Orders', { schema: 'SALES' })).toEqual({ schema: 'sales', name: 'Orders' });
+		});
+
+		it('should reject options that contradict the qualified name', () => {
+			expect(() => ParameterValidator.parseObjectName('sales.Orders', { schema: 'dbo' })).toThrow(/schema "sales".*"dbo"/);
+			expect(() => ParameterValidator.parseObjectName('Shop.sales.Orders', { database: 'Other' })).toThrow(/database/);
+		});
+
+		it('should reject empty names and empty or extra parts', () => {
+			expect(() => ParameterValidator.parseObjectName('')).toThrow('Object name cannot be empty');
+			expect(() => ParameterValidator.parseObjectName('sales.')).toThrow(/Invalid object name/);
+			expect(() => ParameterValidator.parseObjectName('a.b.c.d')).toThrow(/Invalid object name/);
 		});
 	});
 
