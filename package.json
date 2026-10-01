@@ -1,6 +1,6 @@
 {
   "name": "@falldownthesystem/sqlq",
-  "version": "3.2.0",
+  "version": "4.0.0",
   "description": "Read-only Microsoft SQL Server CLI for exploring databases, schemas, and running queries from the terminal",
   "type": "module",
   "main": "dist/index.js",
