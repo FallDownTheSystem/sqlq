@@ -13,7 +13,13 @@ Explore MS SQL Server databases using the `sqlq` CLI tool. Read-only — never m
 
 ## Connection
 
-`sqlq` reads connection config from environment variables or a `.env` file in the current working directory.
+`sqlq` reads connection config from three sources, key by key. A higher source wins:
+
+1. A `.env` file in the current working directory
+2. Shell environment variables
+3. A global file: `%APPDATA%\sqlq\.env` on Windows, `~/.config/sqlq/.env` elsewhere
+
+`sqlq --help` lists the exact paths, every key and an example file. `sqlq config` shows which files exist and which sources supplied the settings.
 
 Required env vars:
 ```
@@ -36,20 +42,19 @@ For secure password input: `sqlq --password-stdin tables`
 
 ### Multiple servers (`-e, --env <name>`)
 
-A project can hold one `.env.<name>` file per server, for example `.env.test`, `.env.release`, `.env.production`. Select one with `-e/--env`:
+Select a named environment with `-e/--env`:
 
 ```bash
 sqlq -e test tables
 sqlq --env production query "SELECT TOP 10 * FROM dbo.Orders"
-sqlq -e release config      # Show the loaded env file (envFile) and resolved settings
+sqlq -e release config      # Show the sources and resolved settings
 ```
 
-- With `--env`, `sqlq` reads only `.env.<name>`. It does not fall back to `.env` for missing keys.
-- The named file overrides `SQLSERVER_*` vars already set in the shell. CLI flags override both.
-- A missing file or a name with characters other than letters, digits, `-`, `_` is an error.
-- Without `--env`, `sqlq` reads `.env` as before.
+- A named environment reads `.env.<name>` (plain `SQLSERVER_HOST` keys), then shell variables, then the global file. The shell and the global file use named keys: `-e prod-eu` reads `SQLSERVER_PROD_EU_HOST`.
+- It never reads the default keys (`.env`, `SQLSERVER_HOST`). CLI flags override every source.
+- An environment that no source defines, or a name with characters other than letters, digits, `-`, `_`, is an error.
 
-Before the first command, check for `.env.*` files in the working directory. If several exist and the user did not name one, ask which environment to use. Pass the same `-e <name>` on every command in the session. Treat `production` (or any live environment) with extra care: keep queries small with `TOP N` and filters.
+Before the first command, run `sqlq config` and check for `.env.*` files in the working directory. If several environments exist and the user did not name one, ask which environment to use. Pass the same `-e <name>` on every command in the session. Treat `production` (or any live environment) with extra care: keep queries small with `TOP N` and filters.
 
 ## Schema Awareness
 
@@ -216,7 +221,7 @@ For piping: `sqlq tables --json | jq '.[] | .table_name'`
 
 | Flag | Description |
 |------|-------------|
-| `-e, --env <name>` | Load settings from `.env.<name>` instead of `.env` |
+| `-e, --env <name>` | Use a named environment (`.env.<name>`, `SQLSERVER_<NAME>_*`) |
 | `--json` | Output raw JSON to stdout |
 | `--plain` | Plain text, no tables/colors |
 | `-d, --database <name>` | Target database override |
@@ -247,4 +252,4 @@ If user asks to modify data, explain read-only constraint.
 | No tables ... named X | Object not found; read the "Did you mean" suggestions or run `sqlq find X` |
 | "X" exists in N schemas | Name is ambiguous; use one of the listed `schema.name` forms |
 | X is a procedure; "describe" works on ... | Wrong command for the object type; run the suggested command |
-| Environment file not found | No `.env.<name>` in the working directory; list `.env.*` and check the name |
+| Environment "X" not found | No source defines X; list `.env.*` and check the name |

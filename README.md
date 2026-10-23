@@ -38,20 +38,48 @@ You can also set these optional variables:
 | `SQLSERVER_REQUEST_TIMEOUT` | `60000` | Query timeout (ms) |
 | `SQLSERVER_MAX_ROWS` | `1000` | Max rows returned per query |
 
-`sqlq` also reads a `.env` file from the current working directory.
+### Where settings come from
+
+`sqlq` combines three sources, key by key. A source higher in this list wins:
+
+1. The project file: `.env` in the current working directory
+2. Shell environment variables
+3. The global file: `%APPDATA%\sqlq\.env` on Windows, `$XDG_CONFIG_HOME/sqlq/.env` (default `~/.config/sqlq/.env`) elsewhere
+
+CLI flags win over all three. Use the global file for servers you query from any directory, and a project file to pin a project to its own server.
+
+`sqlq --help` prints the exact file paths on your machine, every key with its default, and an example file. `sqlq config` shows whether each file exists and which sources supplied the settings.
 
 ### Multiple servers
 
-Put each server's settings in its own `.env.<name>` file and pick one with `-e/--env`:
+Select a named environment with `-e/--env`:
 
 ```bash
-# .env.test, .env.release, .env.production, ...
 sqlq --env test tables
 sqlq -e production query "SELECT TOP 10 * FROM dbo.Orders"
-sqlq -e release config      # Show which file and settings were used
+sqlq -e release config      # Show the sources and settings that were used
 ```
 
-With `--env`, `sqlq` reads only `.env.<name>`. It does not fall back to `.env` for missing keys, so a partial file cannot quietly connect to the wrong server. Values in the named file take precedence over `SQLSERVER_*` variables already set in your shell. CLI flags still take precedence over both. If the file does not exist, `sqlq` exits with an error.
+A named environment uses the same three sources:
+
+1. The project file `.env.<name>`, with plain keys (`SQLSERVER_HOST`)
+2. Shell variables with the name in the key: `-e prod-eu` reads `SQLSERVER_PROD_EU_HOST`, `SQLSERVER_PROD_EU_USER`, and so on
+3. The global file, with the same named keys
+
+The name is upper-cased and `-` becomes `_` in variable names. One global file can hold many environments:
+
+```bash
+# %APPDATA%\sqlq\.env
+SQLSERVER_HOST=localhost
+SQLSERVER_USER=sa
+SQLSERVER_PASSWORD=...
+
+SQLSERVER_PRODUCTION_HOST=prod.example.com
+SQLSERVER_PRODUCTION_USER=reader
+SQLSERVER_PRODUCTION_PASSWORD=...
+```
+
+A named environment never reads the default keys (`SQLSERVER_HOST`, ...) from any source. A key missing from `.env.test` therefore cannot fall back to the default server, which may be production. If no source defines the named environment, `sqlq` exits with an error.
 
 ## Usage
 
@@ -77,7 +105,7 @@ sqlq server-info            # Server version and edition (alias: info)
 sqlq test                   # Test your connection
 sqlq query "SELECT ..."     # Run a read-only query
 sqlq query -f query.sql     # Run SQL from a file
-sqlq config                 # Show resolved connection config
+sqlq config                 # Show settings file locations and resolved connection config
 ```
 
 Every command accepts an optional `-d/--database` flag to target a specific database without changing your connection config.
@@ -100,7 +128,7 @@ When stdout isn't a TTY (piped or redirected), it automatically falls back to pl
 ### Global Flags
 
 ```
--e, --env <name>         Load settings from .env.<name> instead of .env
+-e, --env <name>         Use a named environment (.env.<name>, SQLSERVER_<NAME>_*)
 -d, --database <name>    Target database
 --host <host>            Override SQLSERVER_HOST
 --user <user>            Override SQLSERVER_USER

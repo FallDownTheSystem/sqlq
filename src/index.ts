@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 
-import { config as loadEnv } from 'dotenv';
-import { existsSync } from 'fs';
-import { resolve } from 'path';
 import { createRequire } from 'module';
 import { Command } from 'commander';
 import { ConnectionConfigSchema } from './types.js';
 import { ConnectionManager } from './connection-manager.js';
+import {
+	globalConfigFile,
+	resolveEnvironment,
+	variablePrefix,
+	type ResolvedEnvironment,
+	type Settings,
+	type SettingsFile,
+} from './environment.js';
+import { settingsHelp } from './cli/settings-help.js';
 import {
 	ListDatabasesTool,
 	ListTablesTool,
@@ -31,51 +37,26 @@ const { version } = require('../package.json') as { version: string };
 
 let connectionManager: ConnectionManager | undefined;
 let context: CliContext | undefined;
-let loadedEnvFile: string | undefined;
+let environment: ResolvedEnvironment | undefined;
 
-const ENV_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-/**
- * A named environment loads only `.env.<name>`, never `.env` as well. Layering
- * them would let a missing key in `.env.test` silently fall back to whatever
- * server `.env` points at, which may be production. The named file also wins
- * over variables already set in the shell, because naming it is an explicit
- * choice; CLI flags still win over both.
- */
-function loadEnvironment(envName: string | undefined): void {
-	if (envName === undefined) {
-		const path = resolve('.env');
-		loadEnv({ path, quiet: true });
-		loadedEnvFile = existsSync(path) ? path : undefined;
-		return;
-	}
-
-	if (!ENV_NAME_PATTERN.test(envName)) {
-		throw new Error(`Invalid environment name "${envName}": use letters, digits, "-" or "_"`);
-	}
-
-	const path = resolve(`.env.${envName}`);
-	if (!existsSync(path)) {
-		throw new Error(`Environment file not found: ${path}`);
-	}
-
-	loadEnv({ path, override: true, quiet: true });
-	loadedEnvFile = path;
+/** CLI flags win over every settings source. */
+function buildConfig(opts: GlobalOptions, settings: Settings): Record<string, unknown> {
+	return {
+		server: opts.host ?? settings.HOST ?? 'localhost',
+		database: opts.database ?? settings.DATABASE,
+		user: opts.user ?? settings.USER ?? '',
+		password: opts.password ?? settings.PASSWORD ?? '',
+		port: opts.port ?? parseInt(settings.PORT ?? '1433'),
+		encrypt: opts.encrypt ?? (settings.ENCRYPT !== 'false'),
+		trustServerCertificate: opts.trustCert ?? (settings.TRUST_CERT !== 'false'),
+		connectionTimeout: opts.timeout ?? parseInt(settings.CONNECTION_TIMEOUT ?? '30000'),
+		requestTimeout: parseInt(settings.REQUEST_TIMEOUT ?? '60000'),
+		maxRows: opts.maxRows ?? parseInt(settings.MAX_ROWS ?? '1000'),
+	};
 }
 
-function buildConfig(opts: GlobalOptions): Record<string, unknown> {
-	return {
-		server: opts.host ?? process.env.SQLSERVER_HOST ?? 'localhost',
-		database: opts.database ?? process.env.SQLSERVER_DATABASE,
-		user: opts.user ?? process.env.SQLSERVER_USER ?? '',
-		password: opts.password ?? process.env.SQLSERVER_PASSWORD ?? '',
-		port: opts.port ?? parseInt(process.env.SQLSERVER_PORT || '1433'),
-		encrypt: opts.encrypt ?? (process.env.SQLSERVER_ENCRYPT !== 'false'),
-		trustServerCertificate: opts.trustCert ?? (process.env.SQLSERVER_TRUST_CERT !== 'false'),
-		connectionTimeout: opts.timeout ?? parseInt(process.env.SQLSERVER_CONNECTION_TIMEOUT || '30000'),
-		requestTimeout: parseInt(process.env.SQLSERVER_REQUEST_TIMEOUT || '60000'),
-		maxRows: opts.maxRows ?? parseInt(process.env.SQLSERVER_MAX_ROWS || '1000'),
-	};
+function describeFile(file: SettingsFile): string {
+	return file.exists ? file.path : `${file.path} (not found)`;
 }
 
 function initializeTools(cm: ConnectionManager, maxRows: number): Map<string, BaseTool> {
@@ -164,7 +145,7 @@ async function main(): Promise<void> {
 		.name('sqlq')
 		.description('Read-only SQL Server CLI - explore databases, tables, schemas, and run queries')
 		.version(version)
-		.option('-e, --env <name>', 'Load connection settings from .env.<name> instead of .env')
+		.option('-e, --env <name>', 'Use the named environment: .env.<name> and SQLSERVER_<NAME>_* settings')
 		.option('--json', 'Output raw JSON to stdout')
 		.option('--plain', 'Plain text output, no tables or colors')
 		.option('-d, --database <name>', 'Target database')
@@ -198,14 +179,23 @@ async function main(): Promise<void> {
 
 	program
 		.command('config')
-		.description('Show resolved connection config and connection string')
+		.description('Show resolved connection config, settings file locations and connection string')
+		.addHelpText('after', () => settingsHelp(globalConfigFile()))
 		.action(async () => {
+			if (!environment) {
+				throw new Error('Connection settings not resolved');
+			}
 			const globalOpts = program.opts<GlobalOptions>();
-			const rawConfig = buildConfig(globalOpts);
+			const rawConfig = buildConfig(globalOpts, environment.settings);
 			const mode = getOutputMode(globalOpts);
+			const { sources, projectFile, globalFile } = environment;
 
 			const configData = {
-				envFile: loadedEnvFile ?? '(none)',
+				environment: environment.name ?? '(default)',
+				projectFile: describeFile(projectFile),
+				globalFile: describeFile(globalFile),
+				variables: `${variablePrefix(environment.name)}*`,
+				sources: sources.length > 0 ? sources.join('; ') : '(none)',
 				server: rawConfig.server,
 				port: rawConfig.port,
 				database: rawConfig.database ?? '(default)',
@@ -224,6 +214,9 @@ async function main(): Promise<void> {
 			if (mode === 'json') {
 				outputJson({
 					...configData,
+					projectFile,
+					globalFile,
+					sources,
 					connectionString: connStr,
 					sqlcmd: sqlcmdArgs,
 				});
@@ -256,18 +249,25 @@ async function main(): Promise<void> {
 		return context;
 	});
 
+	program.addHelpText('after', () => settingsHelp(globalConfigFile()));
+
 	program.hook('preAction', async (thisCommand, actionCommand) => {
 		const opts = thisCommand.opts<GlobalOptions>();
 
 		try {
-			loadEnvironment(opts.env);
+			environment = resolveEnvironment(opts.env, {
+				cwd: process.cwd(),
+				variables: process.env,
+				globalFile: globalConfigFile(),
+			});
 		} catch (error) {
 			outputError({
 				error: error instanceof Error ? error.message : String(error),
 				code: 'VALIDATION_ERROR',
 				suggestions: [
 					'Create the file .env.<name> in the current directory, for example .env.test',
-					'Run without --env to use .env',
+					'Or set SQLSERVER_<NAME>_HOST, SQLSERVER_<NAME>_USER, ... in the shell or in the global file',
+					'Run without --env to use the default settings',
 				],
 			}, getOutputMode(opts));
 			process.exitCode = 1;
@@ -280,7 +280,7 @@ async function main(): Promise<void> {
 			opts.password = await readPasswordFromStdin();
 		}
 
-		const rawConfig = buildConfig(opts);
+		const rawConfig = buildConfig(opts, environment.settings);
 
 		let config;
 		try {
