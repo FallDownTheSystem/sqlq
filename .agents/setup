@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Amp orb setup: installs everything needed to lint, typecheck, test and build sqlq.
+# Runs non-interactively before the project snapshot is taken. Never authenticate here.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+step() { printf '\n==> %s\n' "$*"; }
+timed() { local start=$SECONDS; "$@"; printf '    (%ss)\n' "$((SECONDS - start))"; }
+
+step "Checking Node.js (package.json engines: >=22.12.0)"
+node -e '
+  const [maj, min] = process.versions.node.split(".").map(Number);
+  if (maj < 22 || (maj === 22 && min < 12)) {
+    console.error(`Node ${process.versions.node} is too old; sqlq needs >=22.12.0`);
+    process.exit(1);
+  }
+  console.log(`node ${process.versions.node}`);
+'
+npm --version
+
+step "Installing dependencies from package-lock.json"
+timed npm ci --no-audit --no-fund
+
+step "Building dist/"
+timed npm run build --silent
