@@ -1,6 +1,6 @@
 {
   "name": "@falldownthesystem/sqlq",
-  "version": "5.0.0",
+  "version": "5.1.0",
   "description": "Read-only Microsoft SQL Server CLI for exploring databases, schemas, and running queries from the terminal",
   "type": "module",
   "main": "dist/index.js",
@@ -45,6 +45,7 @@
     "access": "public"
   },
   "dependencies": {
+    "@napi-rs/keyring": "^2.1.2",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.0",
     "dotenv": "^17.3.1",

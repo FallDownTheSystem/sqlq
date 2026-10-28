@@ -40,6 +40,8 @@ CLI flags override env vars: `sqlq --host myserver --user sa --password secret t
 
 For secure password input: `sqlq --password-stdin tables`
 
+When no source sets a password, `sqlq` reads it from the OS keychain (entry `sqlq` / `user@host:port`). The user stores it with `sqlq [-e <name>] auth set`, which prompts for it. If a command fails with missing credentials, ask the user to run that themselves; never ask them to paste the password into the conversation.
+
 ### Multiple servers (`-e, --env <name>`)
 
 Select a named environment with `-e/--env`:

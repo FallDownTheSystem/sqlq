@@ -11,8 +11,11 @@ import {
 	type ResolvedEnvironment,
 	type Settings,
 	type SettingsFile,
+	variableName,
 } from './environment.js';
+import { keychainAccount, readKeychainPassword } from './keychain.js';
 import { settingsHelp } from './cli/settings-help.js';
+import { registerAuthCommands } from './cli/auth.js';
 import {
 	ListDatabasesTool,
 	ListTablesTool,
@@ -53,6 +56,37 @@ function buildConfig(opts: GlobalOptions, settings: Settings): Record<string, un
 		requestTimeout: parseInt(settings.REQUEST_TIMEOUT ?? '60000'),
 		maxRows: opts.maxRows ?? parseInt(settings.MAX_ROWS ?? '1000'),
 	};
+}
+
+function loginAccount(config: Record<string, unknown>): string {
+	return keychainAccount(String(config.user), String(config.server), Number(config.port));
+}
+
+interface KeychainLookup {
+	account: string;
+	password?: string;
+	error?: string;
+}
+
+/**
+ * The OS keychain is the last password source: it is only read when no flag
+ * or settings source supplies a password, so existing setups never touch it.
+ */
+async function lookupKeychain(config: Record<string, unknown>): Promise<KeychainLookup | undefined> {
+	if (config.password || !config.user) return undefined;
+	const account = loginAccount(config);
+	try {
+		const password = await readKeychainPassword(account);
+		return password ? { account, password } : { account };
+	} catch (error) {
+		return { account, error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function describeKeychain(lookup: KeychainLookup | undefined): string {
+	if (!lookup) return '(not checked)';
+	if (lookup.error) return `${lookup.account} (unavailable: ${lookup.error})`;
+	return `${lookup.account} (${lookup.password ? 'found' : 'not found'})`;
 }
 
 function describeFile(file: SettingsFile): string {
@@ -188,7 +222,13 @@ async function main(): Promise<void> {
 			const globalOpts = program.opts<GlobalOptions>();
 			const rawConfig = buildConfig(globalOpts, environment.settings);
 			const mode = getOutputMode(globalOpts);
-			const { sources, projectFile, globalFile } = environment;
+			const { projectFile, globalFile } = environment;
+			const keychain = await lookupKeychain(rawConfig);
+			const sources = keychain?.password ? [...environment.sources, 'OS keychain'] : environment.sources;
+			// A keychain password is never printed: it stays out of terminals and agent transcripts.
+			if (keychain?.password) {
+				rawConfig.password = '<from OS keychain>';
+			}
 
 			const configData = {
 				environment: environment.name ?? '(default)',
@@ -196,6 +236,7 @@ async function main(): Promise<void> {
 				globalFile: describeFile(globalFile),
 				variables: `${variablePrefix(environment.name)}*`,
 				sources: sources.length > 0 ? sources.join('; ') : '(none)',
+				keychain: describeKeychain(keychain),
 				server: rawConfig.server,
 				port: rawConfig.port,
 				database: rawConfig.database ?? '(default)',
@@ -249,6 +290,24 @@ async function main(): Promise<void> {
 		return context;
 	});
 
+	registerAuthCommands(program, async () => {
+		if (!environment) {
+			throw new Error('Connection settings not resolved');
+		}
+		const opts = program.opts<GlobalOptions>();
+		const config = buildConfig(opts, environment.settings);
+		if (!config.user) {
+			throw new Error('No user resolved: the keychain stores passwords per user@host:port login');
+		}
+		return {
+			account: loginAccount(config),
+			password: opts.passwordStdin ? await readPasswordFromStdin() : opts.password,
+			shadowedBy: environment.settings.PASSWORD
+				? `${variableName('PASSWORD', environment.name)} is also set (in ${environment.sources.join('; ')}) and takes priority over the keychain`
+				: undefined,
+		};
+	});
+
 	program.addHelpText('after', () => settingsHelp(globalConfigFile()));
 
 	program.hook('preAction', async (thisCommand, actionCommand) => {
@@ -274,13 +333,17 @@ async function main(): Promise<void> {
 			throw error;
 		}
 
-		if (actionCommand.name() === 'config') return;
+		if (actionCommand.name() === 'config' || actionCommand.parent?.name() === 'auth') return;
 
 		if (opts.passwordStdin) {
 			opts.password = await readPasswordFromStdin();
 		}
 
 		const rawConfig = buildConfig(opts, environment.settings);
+		const keychain = await lookupKeychain(rawConfig);
+		if (keychain?.password) {
+			rawConfig.password = keychain.password;
+		}
 
 		let config;
 		try {
@@ -305,7 +368,9 @@ async function main(): Promise<void> {
 				error: 'Missing credentials: user and password are required',
 				code: 'VALIDATION_ERROR',
 				suggestions: [
-					'Set SQLSERVER_USER and SQLSERVER_PASSWORD environment variables',
+					...(keychain?.error ? [`OS keychain lookup for ${keychain.account} failed: ${keychain.error}`] : []),
+					`Store the password in the OS keychain: sqlq${opts.env ? ` -e ${opts.env}` : ''} auth set`,
+					'Or set SQLSERVER_USER and SQLSERVER_PASSWORD environment variables',
 					'Or use --user and --password flags',
 					'For secure password input, use --password-stdin',
 				],

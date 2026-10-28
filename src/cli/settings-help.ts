@@ -30,6 +30,14 @@ Connection settings:
     3. Global file     ${globalFile}
   CLI flags (--host, --user, ...) override all three sources.
 
+  OS keychain:
+    When no source sets a password, sqlq reads it from the OS keychain
+    (macOS Keychain, Windows Credential Manager, Linux Secret Service).
+    Entries use the service "sqlq" and the account user@host:port of the
+    resolved login, for example reader@prod.example.com:1433.
+    "sqlq auth set" prompts for the password and stores it;
+    "sqlq auth clear" removes it. Add -e <name> to pick the login.
+
   The files use dotenv format: one KEY=value per line, "#" starts a comment,
   and values with spaces or "#" go in quotes. Create the global file and its
   folder yourself if they do not exist.

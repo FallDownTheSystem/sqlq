@@ -50,6 +50,22 @@ CLI flags win over all three. Use the global file for servers you query from any
 
 `sqlq --help` prints the exact file paths on your machine, every key with its default, and an example file. `sqlq config` shows whether each file exists and which sources supplied the settings.
 
+### Storing the password in the OS keychain
+
+Instead of keeping the password in a file, store it in the OS keychain (macOS Keychain, Windows Credential Manager, or the Linux Secret Service):
+
+```bash
+sqlq auth set              # Prompts for the password of the resolved login
+sqlq -e production auth set
+sqlq auth clear            # Removes it again
+```
+
+Keep the host, user, and other settings in the sources above and leave out `SQLSERVER_PASSWORD`. The keychain is the last password source: `sqlq` reads it only when no flag, file, or shell variable sets a password.
+
+Entries use the service `sqlq` and the account `user@host:port` of the resolved login, for example `reader@prod.example.com:1433`. The host is lower-cased and the port is always included. Because the entry belongs to a login rather than an environment name, a stored password is only sent to the server it was saved for, and environments that share a login share the entry. `sqlq config` shows which entry it checked; it never prints a password that came from the keychain.
+
+`auth set` also accepts `--password-stdin`. On Linux it needs a running Secret Service provider such as GNOME Keyring or KWallet.
+
 ### Multiple servers
 
 Select a named environment with `-e/--env`:
