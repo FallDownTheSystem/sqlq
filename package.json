@@ -18,8 +18,9 @@
     "prepublishOnly": "npm run build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "lint": "eslint src/**/*.ts",
-    "test": "jest"
+    "lint": "eslint src",
+    "test": "jest",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "sql-server",

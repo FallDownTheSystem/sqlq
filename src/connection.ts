@@ -114,7 +114,7 @@ export class SqlServerConnection {
       await this.connect();
       const result = await this.query('SELECT 1 as test');
       return result.recordset.length > 0;
-    } catch (error) {
+    } catch {
       return false;
     }
   }
