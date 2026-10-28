@@ -1,0 +1,142 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish_current:
+        description: 'Publish the current main version to npm directly, bypassing release-please gating. Use to recover a tagged-but-unpublished release.'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please (open PR or tag merged release)
+        if: ${{ github.event.inputs.publish_current != 'true' }}
+        uses: googleapis/release-please-action@v5
+        id: release1
+
+      # The PR number comes from release-please's own output when this run opened
+      # it, which involves no lookup and so cannot race. The query is only for
+      # adopting a PR an earlier run left open, and it filters on the head branch
+      # rather than the "autorelease: pending" label: any --label filter sends
+      # gh pr list through the search API (see shouldUseSearch in cli/cli), whose
+      # index trails PR creation by seconds, and the label is applied in a
+      # separate call after the PR exists. Filtering on it lost a race against a
+      # PR that was already there roughly half the time.
+      #
+      # Failing to resolve a PR that release-please says it created is now a hard
+      # error. Reporting success in that case is what let the earlier races pass
+      # as green runs that published nothing.
+      - name: Auto-merge the open release PR, if any
+        if: ${{ github.event.inputs.publish_current != 'true' }}
+        id: automerge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE1_PR: ${{ steps.release1.outputs.pr }}
+          RELEASE1_PRS_CREATED: ${{ steps.release1.outputs.prs_created }}
+        run: |
+          set -uo pipefail
+          PR_NUMBER=''
+
+          if [ -n "${RELEASE1_PR:-}" ]; then
+            PR_NUMBER=$(printf '%s' "$RELEASE1_PR" | jq -r '.number // empty')
+            echo "release-please reported release PR #${PR_NUMBER:-<none>}"
+          fi
+
+          # Only a PR release-please reports having just created is worth waiting
+          # for. Adopting one left open by an earlier run needs a single look,
+          # and a genuine nothing-to-release must not stall every no-op push.
+          if [ -z "$PR_NUMBER" ]; then
+            if [ "${RELEASE1_PRS_CREATED:-}" = 'true' ]; then ATTEMPTS=5; else ATTEMPTS=1; fi
+            for attempt in $(seq 1 "$ATTEMPTS"); do
+              PR_NUMBER=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --base main \
+                --json number,headRefName \
+                -q 'map(select(.headRefName | startswith("release-please--branches--main"))) | .[0].number // empty')
+              if [ -n "$PR_NUMBER" ]; then
+                echo "Adopted open release PR #$PR_NUMBER left by an earlier run"
+                break
+              fi
+              echo "No open release PR found (attempt $attempt/$ATTEMPTS)"
+              [ "$attempt" -lt "$ATTEMPTS" ] && sleep 3
+            done
+          fi
+
+          if [ -z "$PR_NUMBER" ]; then
+            if [ "${RELEASE1_PRS_CREATED:-}" = 'true' ]; then
+              echo "::error::release-please created a release PR but it could not be resolved for merging."
+              exit 1
+            fi
+            echo "No open release PR to merge — nothing to release."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Merging release PR #$PR_NUMBER"
+          gh pr merge "$PR_NUMBER" --squash --repo "$GITHUB_REPOSITORY"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Re-run release-please to tag the just-merged release
+        if: ${{ github.event.inputs.publish_current != 'true' && steps.automerge.outputs.merged == 'true' }}
+        uses: googleapis/release-please-action@v5
+        id: release2
+
+      - name: Determine if a release should be published
+        id: gate
+        run: |
+          if [ "${{ github.event.inputs.publish_current }}" = "true" ] || [ "${{ steps.release1.outputs.release_created }}" = "true" ] || [ "${{ steps.release2.outputs.release_created }}" = "true" ]; then
+            echo "release_created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_created=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.release_created == 'true'
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v7
+        if: steps.gate.outputs.release_created == 'true'
+        with:
+          node-version: '24'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm ci
+
+      - name: Lint
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm run lint
+
+      - name: Typecheck
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm run typecheck
+
+      - name: Unit tests
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm test
+
+      # Pinned to the npm 11 line: Trusted Publishing needs >=11.5.1, and
+      # npm@latest broke publishing when 12.0.0 shipped with a missing
+      # 'sigstore' module in libnpmpublish. Bump deliberately, not by float.
+      - name: Ensure OIDC-capable npm (Trusted Publishing needs >=11.5.1)
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm install -g npm@11
+
+      - name: Publish to npm (Trusted Publishing via OIDC)
+        if: steps.gate.outputs.release_created == 'true'
+        run: npm publish --access public

@@ -12,7 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run build          # TypeScript compile (tsc) → dist/
 npm run dev            # Run with tsx (no build needed)
 npm start              # Run compiled output (dist/index.js)
-npm run lint           # ESLint on src/**/*.ts
+npm run lint           # ESLint on src/ (eslint.config.js)
+npm run typecheck      # tsc --noEmit
 npm test               # Jest
 ```
 
@@ -64,3 +65,23 @@ Any of these can be overridden by CLI flags (`--host`, `--user`, `--password`, `
 - Tools that take an object name parse it with `ParameterValidator.parseObjectName()` (`name`, `schema.name`, `db.schema.name`) and resolve it with `BaseTool.resolveObject()` (`src/tools/objects.ts`), which searches all schemas and throws errors that list alternatives and close matches. Metadata queries then filter by `object_id` against `sys.*` catalog views
 - Object and schema names are always bound as query parameters, so validation only checks length; never interpolate them
 - Identifiers are bracket-escaped (`[name]`) before interpolation into SQL
+
+## Release & CI Automation
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please-action), set up the same way as the `converse` repo. **Do not bump `version` in `package.json`, edit `.release-please-manifest.json`, create `vX.Y.Z` tags, write `CHANGELOG.md` entries, or run `npm publish` by hand.** The automation owns all of these.
+
+- **Every push to `main` with a user-facing commit publishes a patch release.** `.github/workflows/release.yml` runs release-please, which opens a "chore(main): release X.Y.Z" PR. The workflow squash-merges it, runs release-please again to tag `vX.Y.Z` and create the GitHub Release, then runs `npm ci`, lint, typecheck and tests, and publishes to npm with Trusted Publishing (OIDC, no `NPM_TOKEN`).
+- Use conventional commit prefixes (`feat:`, `fix:`, `deps:`, `docs:`, `chore:`, `ci:` ...). They group the changelog. Pushes whose commits are all hidden types (`ci:`, `build:`) release nothing.
+- `versioning-strategy` is `always-bump-patch`, so `feat:` and `BREAKING CHANGE:` do not bump minor or major. To do that, add a `Release-As: X.Y.Z` footer to the commit body.
+- `release-please-config.json` pins `bootstrap-sha` to the 6.0.0 commit because no `v6.0.0` tag exists. Remove it once the first automated release is tagged.
+
+### Dependabot
+
+- `.github/dependabot.yml` checks npm and GitHub Actions daily at 06:00 UTC. Minor and patch updates are grouped into one PR per ecosystem; majors get their own PRs. Commits use the `deps:` prefix.
+- `.github/workflows/dependabot-auto-merge.yml` approves and auto-merges minor and patch PRs, then dispatches `release.yml` so the update ships as a patch release. Major updates get the `needs-review` label and wait for a human.
+- Don't bump dependencies by hand unless it's urgent; Dependabot handles routine updates.
+
+### CI
+
+- `.github/workflows/ci.yml` runs lint, typecheck and tests on every PR and every push to `main`. It skips release-please PRs by branch name, since they are merged within seconds and `release.yml` validates before publishing.
+- CI does not gate merges (no branch protection), but fix failures before pushing more changes.
