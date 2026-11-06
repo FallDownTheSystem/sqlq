@@ -1,5 +1,13 @@
 # Changelog
 
+## [6.1.0](https://github.com/FallDownTheSystem/sqlq/compare/v6.0.2...v6.1.0) (2026-11-06)
+
+
+### Features
+
+* read .env.&lt;name&gt; from the global settings folder for named environments ([6593483](https://github.com/FallDownTheSystem/sqlq/commit/659348367b78fa255fd0ef0b9c505673d5e124c8))
+* sign in with Microsoft Entra MFA (SQLSERVER_AUTH=entra-mfa) ([6593483](https://github.com/FallDownTheSystem/sqlq/commit/659348367b78fa255fd0ef0b9c505673d5e124c8))
+
 ## [6.0.2](https://github.com/FallDownTheSystem/sqlq/compare/v6.0.1...v6.0.2) (2026-11-02)
 
 
