@@ -110,7 +110,7 @@ export function registerAuthCommands(program: Command, getContext: AuthContextGe
 		.description('Prompt for the password and store it in the OS keychain; with entra-mfa, sign in')
 		.action(() => run(program, getContext, async (ctx, mode) => {
 			if (ctx.entra) {
-				const account = await ctx.entra.signIn(true);
+				const account = await ctx.entra.signIn(ctx.entra.tenantFor(undefined), true);
 				report(mode, { signedIn: true, account: account.username }, `Signed in to Microsoft Entra as ${account.username}`);
 				return;
 			}

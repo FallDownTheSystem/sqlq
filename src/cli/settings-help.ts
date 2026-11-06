@@ -13,7 +13,7 @@ const SETTING_DESCRIPTIONS: Record<SettingKey, string> = {
 	REQUEST_TIMEOUT: 'Query timeout in ms (default: 60000)',
 	MAX_ROWS: 'Maximum rows per query (default: 1000)',
 	AUTH: '"sql" (default) or "entra-mfa" for Microsoft Entra MFA',
-	TENANT_ID: 'Entra tenant ID or domain (default: the account\'s home tenant)',
+	TENANT_ID: 'Entra tenant ID or domain (default: the server\'s tenant)',
 	CLIENT_ID: 'Entra app (client) ID for sign-in (default: the Azure CLI app)',
 };
 
@@ -46,7 +46,8 @@ Connection settings:
     The same sign-in as "Microsoft Entra MFA" in SSMS. The first command
     opens the browser to sign in; set SQLSERVER_USER to your Entra account
     (user@example.com) to pre-fill it and pick it from several. No password
-    is used. Sign-ins are cached in
+    is used. sqlq signs in to the tenant the server asks for, so guest
+    accounts need no tenant setting. Sign-ins are cached in
     ${join(dirname(globalFile), 'entra-token-cache.json')},
     encrypted with a key kept in the OS keychain, and refreshed silently
     until the tenant asks for MFA again.

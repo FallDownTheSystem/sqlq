@@ -3,7 +3,16 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { AccountInfo, TokenCacheContext } from '@azure/msal-node';
-import { decryptCache, encryptCache, encryptedFileCachePlugin, matchAccounts } from '../entra.js';
+import {
+	decryptCache,
+	describeRejectedToken,
+	encryptCache,
+	encryptedFileCachePlugin,
+	EntraLogin,
+	matchAccounts,
+	stsUrlFromDebug,
+	tenantFromStsUrl,
+} from '../entra.js';
 
 const account = (username: string, tenantId: string) => ({ username, tenantId } as AccountInfo);
 
@@ -69,17 +78,53 @@ describe('entra token cache', () => {
 });
 
 describe('matchAccounts', () => {
-	const work = account('Ann@Contoso.com', 'tenant-a');
-	const guest = account('ann@contoso.com', 'tenant-b');
+	const home = account('Ann@Contoso.com', 'tenant-a');
 	const other = account('bob@contoso.com', 'tenant-a');
 
-	it('should pick the configured user case-insensitively, within the tenant when one is set', () => {
-		expect(matchAccounts([work, guest, other], { user: 'ANN@contoso.com', tenantId: undefined })).toEqual([work, guest]);
-		expect(matchAccounts([work, guest, other], { user: 'ann@contoso.com', tenantId: 'TENANT-B' })).toEqual([guest]);
-		expect(matchAccounts([work, other], { user: 'carol@contoso.com', tenantId: undefined })).toEqual([]);
+	it('should pick the configured user case-insensitively, whatever tenant the server asks for', () => {
+		expect(matchAccounts([home, other], 'ANN@contoso.com')).toEqual([home]);
+		expect(matchAccounts([home, other], 'carol@contoso.com')).toEqual([]);
+		expect(matchAccounts([home, other], '')).toEqual([home, other]);
+	});
+});
+
+describe('server tenant', () => {
+	const guid = 'f88fbc21-f940-428d-b0cf-724caf714df2';
+
+	it('should take the tenant from the STSURL on either login host', () => {
+		expect(tenantFromStsUrl('https://login.windows.net/F88FBC21-F940-428D-B0CF-724CAF714DF2')).toBe(guid);
+		expect(tenantFromStsUrl(`https://login.microsoftonline.com/${guid}/`)).toBe(guid);
+		expect(tenantFromStsUrl('https://login.windows.net/contoso.onmicrosoft.com//')).toBe('contoso.onmicrosoft.com');
 	});
 
-	it('should return every account in the tenant when no user is set', () => {
-		expect(matchAccounts([work, guest, other], { user: '', tenantId: 'tenant-a' })).toEqual([work, other]);
+	it('should ignore missing, malformed and foreign authorities', () => {
+		for (const value of [undefined, '', 'not a url', `http://login.windows.net/${guid}`, `https://evil.example/${guid}`,
+			'https://login.windows.net/', 'https://login.windows.net/common', 'https://login.windows.net/a b']) {
+			expect(tenantFromStsUrl(value)).toBeUndefined();
+		}
+	});
+
+	it('should read the STSURL from tedious token debug output only', () => {
+		// util.inspect output of tedious' FedAuthInfoToken, colors included, as the driver emits it.
+		const line = "FedAuthInfoToken {\n  name: \u001b[32m'FEDAUTHINFO'\u001b[39m,\n  handlerName: \u001b[32m'onFedAuthInfo'\u001b[39m,\n  spn: \u001b[32m'https://database.windows.net/'\u001b[39m,\n  stsurl: \u001b[32m'https://login.windows.net/F88FBC21-F940-428D-B0CF-724CAF714DF2'\u001b[39m\n}";
+		expect(stsUrlFromDebug(line)).toBe('https://login.windows.net/F88FBC21-F940-428D-B0CF-724CAF714DF2');
+		expect(stsUrlFromDebug("RowToken { stsurl: 'https://login.windows.net/x' }")).toBeUndefined();
+		expect(stsUrlFromDebug('State change: SentLogin7WithFedauth -> LoggedIn')).toBeUndefined();
+	});
+
+	it('should prefer the configured tenant over the server\'s', () => {
+		const options = { user: '', clientId: undefined, cacheFile: '/nonexistent' };
+		expect(new EntraLogin({ ...options, tenantId: 'mine' }).tenantFor(guid)).toBe('mine');
+		expect(new EntraLogin({ ...options, tenantId: undefined }).tenantFor(guid)).toBe(guid);
+		expect(new EntraLogin({ ...options, tenantId: undefined }).tenantFor(undefined)).toBeUndefined();
+	});
+
+	it('should explain a token the server rejects, naming both tenants', () => {
+		const message = "Login failed for user '<token-identified principal>'. The server is not currently configured to accept this token.";
+		expect(describeRejectedToken(message, 'wrong-tenant', guid))
+			.toBe(`The server rejected the Microsoft Entra token: sqlq signed in to wrong-tenant, but the server trusts tenant ${guid}.`);
+		expect(describeRejectedToken("Login failed for user '<token-identified principal>'.", undefined, undefined))
+			.toContain('signed in to your home tenant');
+		expect(describeRejectedToken("Login failed for user 'sa'.", 'x', guid)).toBeUndefined();
 	});
 });

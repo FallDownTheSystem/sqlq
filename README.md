@@ -38,7 +38,7 @@ You can also set these optional variables:
 | `SQLSERVER_REQUEST_TIMEOUT` | `60000` | Query timeout (ms) |
 | `SQLSERVER_MAX_ROWS` | `1000` | Max rows returned per query |
 | `SQLSERVER_AUTH` | `sql` | `sql` for a SQL login, `entra-mfa` for [Microsoft Entra MFA](#microsoft-entra-mfa) |
-| `SQLSERVER_TENANT_ID` | home tenant | Entra tenant ID or domain, for guest accounts |
+| `SQLSERVER_TENANT_ID` | the server's tenant | Entra tenant ID or domain to sign in to |
 | `SQLSERVER_CLIENT_ID` | Azure CLI app | Entra app (client) ID used to sign in |
 
 ### Where settings come from
@@ -83,7 +83,7 @@ SQLSERVER_USER=you@example.com   # optional: pre-fills the sign-in and picks the
 
 The sign-in is cached in `sqlq/entra-token-cache.json` next to the global file, encrypted with a key kept in the OS keychain, and refreshed silently until the tenant asks for MFA again. `sqlq auth set` signs in again (and lets you pick another account); `sqlq auth clear` signs out. Without a working OS keychain the sign-in still works but is not remembered.
 
-For a guest account, set `SQLSERVER_TENANT_ID` to the tenant that owns the database. Sign-in uses the public client ID of the Azure CLI, as `@azure/identity` does; if your tenant only allows its own apps, set `SQLSERVER_CLIENT_ID` to an app registration with `http://localhost` as a mobile and desktop redirect URI.
+During login an Azure SQL server names the Entra tenant it trusts, and sqlq signs in to that tenant, as SSMS does. Guest accounts therefore need no tenant setting, and one sign-in serves every server in the same tenant. `SQLSERVER_TENANT_ID` (or `--tenant-id`) overrides it; `sqlq config` shows where the tenant comes from. When no browser prompt appears, the browser already had a session that satisfied MFA. Sign-in uses the public client ID of the Azure CLI, as `@azure/identity` does; if your tenant only allows its own apps, set `SQLSERVER_CLIENT_ID` to an app registration with `http://localhost` as a mobile and desktop redirect URI.
 
 ### Multiple servers
 
@@ -166,6 +166,7 @@ When stdout isn't a TTY (piped or redirected), it automatically falls back to pl
 ```
 -e, --env <name>         Use a named environment (.env.<name>, SQLSERVER_<NAME>_*)
 --auth <type>            Override SQLSERVER_AUTH (sql or entra-mfa)
+--tenant-id <id>         Override SQLSERVER_TENANT_ID
 -d, --database <name>    Target database
 --host <host>            Override SQLSERVER_HOST
 --user <user>            Override SQLSERVER_USER

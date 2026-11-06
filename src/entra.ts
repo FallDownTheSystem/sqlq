@@ -26,6 +26,7 @@ export function entraCacheFile(): string {
 export interface EntraOptions {
 	/** Login hint and cached-account filter; any account when empty. */
 	user: string;
+	/** Set by the user; wins over the tenant the server asks for. */
 	tenantId: string | undefined;
 	clientId: string | undefined;
 	cacheFile: string;
@@ -105,28 +106,92 @@ async function cacheKey(): Promise<Buffer> {
 	return key;
 }
 
+/** The cached accounts this login may use: the one named by the user setting, or all of them. */
+export function matchAccounts(accounts: AccountInfo[], user: string): AccountInfo[] {
+	if (!user) return accounts;
+	const wanted = user.toLowerCase();
+	return accounts.filter(account => account.username.toLowerCase() === wanted);
+}
+
+const TENANT_PATTERN = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i;
+
 /**
- * The cached accounts this login may use: the one named by the user setting,
- * or, without one, any account as long as there is only one to pick from.
+ * The tenant in the STSURL an Azure SQL server sends in its FEDAUTHINFO
+ * login token, for example https://login.windows.net/<tenant-id>. That is
+ * the tenant of the server's Entra admin, the only one whose tokens it takes.
  */
-export function matchAccounts(accounts: AccountInfo[], options: Pick<EntraOptions, 'user' | 'tenantId'>): AccountInfo[] {
-	const inTenant = options.tenantId
-		? accounts.filter(account => account.tenantId.toLowerCase() === options.tenantId!.toLowerCase())
-		: accounts;
-	if (!options.user) return inTenant;
-	const user = options.user.toLowerCase();
-	return inTenant.filter(account => account.username.toLowerCase() === user);
+export function tenantFromStsUrl(stsurl: string | undefined): string | undefined {
+	if (!stsurl) return undefined;
+	let url: URL;
+	try {
+		url = new URL(stsurl);
+	} catch {
+		return undefined;
+	}
+	if (url.protocol !== 'https:' || !/^login\.(windows\.net|microsoftonline\.com)$/i.test(url.hostname)) {
+		return undefined;
+	}
+	const tenant = url.pathname.split('/').filter(Boolean)[0];
+	return tenant && TENANT_PATTERN.test(tenant) ? tenant.toLowerCase() : undefined;
+}
+
+/**
+ * tedious reads FEDAUTHINFO but passes only the scope to the credential, so
+ * the STSURL is taken from its public token debug output. Resolves
+ * undefined for every other debug line.
+ */
+export function stsUrlFromDebug(text: string): string | undefined {
+	const plain = text.replace(/\x1b\[[0-9;]*m/g, '');
+	if (!plain.startsWith('FedAuthInfoToken')) return undefined;
+	return /stsurl: '([^']*)'/.exec(plain)?.[1];
+}
+
+/**
+ * Explains a login failure for a token the server would not take; the
+ * driver reports it as a generic login failure (error 18456).
+ */
+export function describeRejectedToken(
+	message: string,
+	usedTenant: string | undefined,
+	serverTenant: string | undefined,
+): string | undefined {
+	if (!/token-identified principal|not currently configured to accept this token/i.test(message)) {
+		return undefined;
+	}
+	const used = usedTenant ?? 'your home tenant';
+	const asked = serverTenant ? `tenant ${serverTenant}` : 'a tenant it did not name';
+	return `The server rejected the Microsoft Entra token: sqlq signed in to ${used}, but the server trusts ${asked}.`;
+}
+
+/** Thrown by the credential when only a browser sign-in can produce a token for the tenant. */
+export class SignInRequired extends Error {
+	constructor(readonly tenant: string | undefined) {
+		super(`Microsoft Entra sign-in required for ${tenant ?? 'the home tenant'}`);
+		this.name = 'SignInRequired';
+	}
+}
+
+function authority(tenant: string | undefined): string {
+	return `https://login.microsoftonline.com/${tenant ?? 'organizations'}`;
 }
 
 const SUCCESS_PAGE = '<!doctype html><title>sqlq</title><p>Signed in to sqlq. You can close this tab.</p>';
 
+interface CachedToken { token: string; expiresOnTimestamp: number }
+
 export class EntraLogin {
 	private app: Promise<PublicClientApplication> | undefined;
-	private token: { token: string; expiresOnTimestamp: number } | undefined;
+	/** Access tokens by tenant ('' for the home tenant). */
+	private tokens = new Map<string, CachedToken>();
 	/** Set when the token cache could not be persisted, so sign-ins are not remembered. */
 	persistenceError: string | undefined;
 
 	constructor(private readonly options: EntraOptions) {}
+
+	/** The tenant to sign in to: the configured one, else the one the server asked for. */
+	tenantFor(serverTenant: string | undefined): string | undefined {
+		return this.options.tenantId ?? serverTenant;
+	}
 
 	private client(): Promise<PublicClientApplication> {
 		this.app ??= (async () => {
@@ -140,7 +205,7 @@ export class EntraLogin {
 			return new PublicClientApplication({
 				auth: {
 					clientId: this.options.clientId ?? DEFAULT_CLIENT_ID,
-					authority: `https://login.microsoftonline.com/${this.options.tenantId ?? 'organizations'}`,
+					authority: authority(undefined),
 				},
 				...(cachePlugin ? { cache: { cachePlugin } } : {}),
 			});
@@ -150,27 +215,32 @@ export class EntraLogin {
 
 	private async cachedAccounts(): Promise<AccountInfo[]> {
 		const app = await this.client();
-		return matchAccounts(await app.getTokenCache().getAllAccounts(), this.options);
+		return matchAccounts(await app.getTokenCache().getAllAccounts(), this.options.user);
 	}
 
-	/** Opens the browser for sign-in and MFA, as SSMS's "Microsoft Entra MFA" does. */
-	async signIn(selectAccount = false): Promise<AccountInfo> {
+	/**
+	 * Opens the browser for sign-in and MFA, as SSMS's "Microsoft Entra MFA"
+	 * does. When the browser already has a session that satisfies MFA, Entra
+	 * redirects back at once without a prompt.
+	 */
+	async signIn(tenant: string | undefined, selectAccount = false): Promise<AccountInfo> {
 		const app = await this.client();
 		const { default: open } = await import('open');
 		const result = await app.acquireTokenInteractive({
 			scopes: [SQL_SCOPE],
+			authority: authority(tenant),
 			...(this.options.user ? { loginHint: this.options.user } : {}),
 			...(selectAccount ? { prompt: 'select_account' } : {}),
 			successTemplate: SUCCESS_PAGE,
 			openBrowser: async (url) => {
-				process.stderr.write(`Opening the browser for Microsoft Entra sign-in. If it does not open, go to:\n${url}\n`);
+				process.stderr.write(`Opening the browser for Microsoft Entra sign-in to ${tenant ?? 'your home tenant'}. If it does not open, go to:\n${url}\n`);
 				await open(url).catch(() => undefined);
 			},
 		});
 		if (!result.account) {
 			throw new Error('Microsoft Entra sign-in returned no account');
 		}
-		this.remember(result.accessToken, result.expiresOn);
+		this.remember(tenant, result.accessToken, result.expiresOn);
 		if (this.persistenceError) {
 			process.stderr.write(`Warning: the sign-in is not remembered, the OS keychain is unavailable: ${this.persistenceError}\n`);
 		}
@@ -187,38 +257,47 @@ export class EntraLogin {
 		for (const account of accounts) {
 			await app.getTokenCache().removeAccount(account);
 		}
-		this.token = undefined;
+		this.tokens.clear();
 		return accounts.map(account => account.username);
 	}
 
-	private remember(token: string, expiresOn: Date | null): void {
-		this.token = { token, expiresOnTimestamp: expiresOn?.getTime() ?? Date.now() + 5 * 60_000 };
+	private remember(tenant: string | undefined, token: string, expiresOn: Date | null): void {
+		this.tokens.set(tenant ?? '', { token, expiresOnTimestamp: expiresOn?.getTime() ?? Date.now() + 5 * 60_000 });
+	}
+
+	/** A token for the tenant from memory or the cache, refreshed silently; undefined when a browser sign-in is needed. */
+	async silentToken(tenant: string | undefined): Promise<CachedToken | undefined> {
+		const known = this.tokens.get(tenant ?? '');
+		if (known && known.expiresOnTimestamp - Date.now() > 2 * 60_000) {
+			return known;
+		}
+		const accounts = await this.cachedAccounts();
+		if (accounts.length !== 1) return undefined;
+		const app = await this.client();
+		try {
+			// One refresh token serves every tenant the account is a member or guest of.
+			const result = await app.acquireTokenSilent({ account: accounts[0]!, scopes: [SQL_SCOPE], authority: authority(tenant) });
+			this.remember(tenant, result.accessToken, result.expiresOn);
+			return this.tokens.get(tenant ?? '');
+		} catch {
+			// Expired or revoked refresh token, or MFA required again.
+			return undefined;
+		}
 	}
 
 	/**
-	 * Uses a cached sign-in when one matches and only opens the browser when
-	 * it cannot be refreshed silently. Call it before connecting: tedious'
-	 * connect timeout would otherwise expire during an MFA prompt.
+	 * The credential tedious calls during login, after the server has named
+	 * its tenant. It never opens the browser: the login's connect timeout
+	 * would run during MFA. It throws SignInRequired instead, and the caller
+	 * signs in and connects again.
 	 */
-	credential(): SqlTokenCredential {
+	credential(serverTenant: () => string | undefined): SqlTokenCredential {
 		return {
 			getToken: async () => {
-				if (this.token && this.token.expiresOnTimestamp - Date.now() > 2 * 60_000) {
-					return this.token;
-				}
-				const app = await this.client();
-				const accounts = await this.cachedAccounts();
-				if (accounts.length === 1) {
-					try {
-						const result = await app.acquireTokenSilent({ account: accounts[0]!, scopes: [SQL_SCOPE] });
-						this.remember(result.accessToken, result.expiresOn);
-						return this.token!;
-					} catch {
-						// Expired or revoked refresh token, or MFA required again: sign in below.
-					}
-				}
-				await this.signIn(accounts.length > 1);
-				return this.token!;
+				const tenant = this.tenantFor(serverTenant());
+				const token = await this.silentToken(tenant);
+				if (!token) throw new SignInRequired(tenant);
+				return token;
 			},
 		};
 	}
@@ -226,7 +305,7 @@ export class EntraLogin {
 
 const logins = new Map<string, EntraLogin>();
 
-/** One login per user, tenant and client, so every pool shares one sign-in. */
+/** One login per user and client, so every pool shares its sign-ins. */
 export function entraLogin(options: EntraOptions): EntraLogin {
 	const key = JSON.stringify([options.user.toLowerCase(), options.tenantId, options.clientId, options.cacheFile]);
 	let login = logins.get(key);

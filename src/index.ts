@@ -57,7 +57,7 @@ function buildConfig(opts: GlobalOptions, settings: Settings): Record<string, un
 		connectionTimeout: opts.timeout ?? parseInt(settings.CONNECTION_TIMEOUT ?? '30000'),
 		requestTimeout: parseInt(settings.REQUEST_TIMEOUT ?? '60000'),
 		maxRows: opts.maxRows ?? parseInt(settings.MAX_ROWS ?? '1000'),
-		tenantId: settings.TENANT_ID,
+		tenantId: opts.tenantId ?? settings.TENANT_ID,
 		clientId: settings.CLIENT_ID,
 	};
 }
@@ -126,6 +126,7 @@ function initializeTools(cm: ConnectionManager, maxRows: number): Map<string, Ba
 interface GlobalOptions {
 	env?: string;
 	auth?: string;
+	tenantId?: string;
 	json?: boolean;
 	plain?: boolean;
 	database?: string;
@@ -192,6 +193,7 @@ async function main(): Promise<void> {
 		.version(version)
 		.option('-e, --env <name>', 'Use the named environment: .env.<name> and SQLSERVER_<NAME>_* settings')
 		.option('--auth <type>', 'Authentication: "sql" or "entra-mfa" (overrides SQLSERVER_AUTH)')
+		.option('--tenant-id <id>', 'Entra tenant for entra-mfa (overrides SQLSERVER_TENANT_ID and the server\'s tenant)')
 		.option('--json', 'Output raw JSON to stdout')
 		.option('--plain', 'Plain text output, no tables or colors')
 		.option('-d, --database <name>', 'Target database')
@@ -251,7 +253,11 @@ async function main(): Promise<void> {
 				sources: sources.length > 0 ? sources.join('; ') : '(none)',
 				authentication: rawConfig.authentication,
 				...(isEntra(rawConfig) ? {
-					tenantId: rawConfig.tenantId ?? '(home tenant)',
+					tenantId: globalOpts.tenantId
+						? `${globalOpts.tenantId} (from --tenant-id)`
+						: rawConfig.tenantId
+							? `${rawConfig.tenantId} (from ${variableName('TENANT_ID', environment.name)})`
+							: '(from the server when connecting)',
 					entraCache: entraCacheFile(),
 				} : { keychain: describeKeychain(keychain) }),
 				server: rawConfig.server,

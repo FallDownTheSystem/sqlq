@@ -52,7 +52,7 @@ To add a new command: create a tool in `src/tools/`, extend `BaseTool`, export f
 ## Environment Variables
 
 Required: `SQLSERVER_HOST`, `SQLSERVER_USER`, `SQLSERVER_PASSWORD`
-Optional: `SQLSERVER_DATABASE`, `SQLSERVER_PORT` (1433), `SQLSERVER_ENCRYPT` (true), `SQLSERVER_TRUST_CERT` (true), `SQLSERVER_CONNECTION_TIMEOUT` (30000), `SQLSERVER_REQUEST_TIMEOUT` (60000), `SQLSERVER_MAX_ROWS` (1000), `SQLSERVER_AUTH` (`sql`, or `entra-mfa` for Microsoft Entra MFA via `src/entra.ts`; then no password is needed), `SQLSERVER_TENANT_ID`, `SQLSERVER_CLIENT_ID`
+Optional: `SQLSERVER_DATABASE`, `SQLSERVER_PORT` (1433), `SQLSERVER_ENCRYPT` (true), `SQLSERVER_TRUST_CERT` (true), `SQLSERVER_CONNECTION_TIMEOUT` (30000), `SQLSERVER_REQUEST_TIMEOUT` (60000), `SQLSERVER_MAX_ROWS` (1000), `SQLSERVER_AUTH` (`sql`, or `entra-mfa` for Microsoft Entra MFA via `src/entra.ts`; then no password is needed), `SQLSERVER_TENANT_ID` (default: the tenant the server names in its FEDAUTHINFO login token), `SQLSERVER_CLIENT_ID`
 
 With `-e/--env <name>`, the shell and the global file use named keys (`SQLSERVER_<NAME>_HOST`), and `.env.<name>` (project or global folder) uses plain keys. A named environment never reads the default keys.
 

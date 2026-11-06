@@ -1,5 +1,12 @@
 import sql from 'mssql';
-import { entraCacheFile, entraLogin, SQL_SCOPE } from './entra.js';
+import {
+  describeRejectedToken,
+  entraCacheFile,
+  entraLogin,
+  SignInRequired,
+  stsUrlFromDebug,
+  tenantFromStsUrl,
+} from './entra.js';
 import { SqlqError } from './errors.js';
 import { ConnectionConfig, QueryParam } from './types.js';
 
@@ -19,17 +26,77 @@ export class SqlServerConnection {
     if (this.pool) {
       return;
     }
+    if (this.config.authentication === 'sql') {
+      await this.openPool({ user: this.config.user, password: this.config.password });
+      return;
+    }
 
+    const login = entraLogin({
+      user: this.config.user,
+      tenantId: this.config.tenantId,
+      clientId: this.config.clientId,
+      cacheFile: entraCacheFile(),
+    });
+    // Filled in from the server's FEDAUTHINFO during each login attempt.
+    let serverTenant: string | undefined;
+    const entraConfig: Partial<sql.config> = {
+      authentication: { type: 'token-credential', options: { credential: login.credential(() => serverTenant) } },
+      beforeConnect: (conn) => {
+        const onDebug = (text: string) => {
+          const stsurl = stsUrlFromDebug(text);
+          if (stsurl !== undefined) serverTenant = tenantFromStsUrl(stsurl);
+        };
+        conn.on('debug', onDebug);
+        // With no listener left, tedious stops formatting debug output, so queries pay nothing.
+        conn.once('connect', () => conn.off('debug', onDebug));
+      },
+    };
+
+    try {
+      try {
+        await this.openPool(entraConfig);
+      } catch (error) {
+        const signIn = findCause(error, (cause): cause is SignInRequired => cause instanceof SignInRequired);
+        if (!signIn) throw error;
+        // Outside the login, so the connect timeout does not run during MFA.
+        await login.signIn(signIn.tenant);
+        await this.openPool(entraConfig);
+      }
+    } catch (error) {
+      const rejected = describeRejectedToken(messages(error), login.tenantFor(serverTenant), serverTenant);
+      if (rejected) {
+        throw new SqlqError(rejected, 'AUTH_ERROR', undefined, [
+          `Remove SQLSERVER_TENANT_ID (or --tenant-id) to use the server's tenant${serverTenant ? `, or set it to ${serverTenant}` : ''}`,
+          'Check that your account is a user in that database',
+        ]);
+      }
+      if (findCause(error, (cause): cause is SignInRequired => cause instanceof SignInRequired) || isMsalError(error)) {
+        throw new SqlqError(
+          `Microsoft Entra sign-in failed: ${messages(error)}`,
+          'AUTH_ERROR',
+          undefined,
+          [
+            'Sign in again with: sqlq auth set (add -e <name> for a named environment)',
+            'If the tenant blocks the default sign-in app, set SQLSERVER_CLIENT_ID to an app registration with an http://localhost redirect URI',
+          ],
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async openPool(auth: Partial<sql.config>): Promise<void> {
     const sqlConfig: sql.config = {
       server: this.config.server,
       database: this.config.database,
-      ...(await this.credentials()),
+      ...auth,
       port: this.config.port,
       options: {
         encrypt: this.config.encrypt,
         trustServerCertificate: this.config.trustServerCertificate,
         connectTimeout: this.config.connectionTimeout,
         requestTimeout: this.config.requestTimeout,
+        ...(auth.beforeConnect ? { debug: { token: true, packet: false, data: false, payload: false } } : {}),
       },
       pool: {
         max: 10,
@@ -38,36 +105,14 @@ export class SqlServerConnection {
       },
     };
 
-    this.pool = new sql.ConnectionPool(sqlConfig);
-    await this.pool.connect();
-  }
-
-  private async credentials(): Promise<Pick<sql.config, 'user' | 'password' | 'authentication'>> {
-    if (this.config.authentication === 'sql') {
-      return { user: this.config.user, password: this.config.password };
-    }
-    const credential = entraLogin({
-      user: this.config.user,
-      tenantId: this.config.tenantId,
-      clientId: this.config.clientId,
-      cacheFile: entraCacheFile(),
-    }).credential();
-    // Sign in before connecting, so the connect timeout does not run during MFA.
+    const pool = new sql.ConnectionPool(sqlConfig);
     try {
-      await credential.getToken(SQL_SCOPE);
+      await pool.connect();
     } catch (error) {
-      throw new SqlqError(
-        `Microsoft Entra sign-in failed: ${error instanceof Error ? error.message : String(error)}`,
-        'AUTH_ERROR',
-        undefined,
-        [
-          'Sign in again with: sqlq auth set (add -e <name> for a named environment)',
-          'For a guest account, set SQLSERVER_TENANT_ID to the tenant of the database',
-          'If the tenant blocks the default sign-in app, set SQLSERVER_CLIENT_ID to an app registration with an http://localhost redirect URI',
-        ],
-      );
+      await pool.close().catch(() => undefined);
+      throw error;
     }
-    return { authentication: { type: 'token-credential', options: { credential } } };
+    this.pool = pool;
   }
 
   async disconnect(): Promise<void> {
@@ -155,4 +200,24 @@ export class SqlServerConnection {
   getConfig(): Readonly<ConnectionConfig> {
     return { ...this.config };
   }
+}
+
+/** mssql wraps driver errors in originalError, and tedious wraps login errors in an AggregateError. */
+function causes(error: unknown, seen = new Set<unknown>()): unknown[] {
+  if (!error || typeof error !== 'object' || seen.has(error)) return [];
+  seen.add(error);
+  const e = error as { originalError?: unknown; cause?: unknown; errors?: unknown[] };
+  return [error, ...causes(e.originalError, seen), ...causes(e.cause, seen), ...(e.errors ?? []).flatMap(inner => causes(inner, seen))];
+}
+
+function findCause<T>(error: unknown, match: (cause: unknown) => cause is T): T | undefined {
+  return causes(error).find(match);
+}
+
+function messages(error: unknown): string {
+  return [...new Set(causes(error).map(cause => (cause as Error).message).filter(Boolean))].join(': ');
+}
+
+function isMsalError(error: unknown): boolean {
+  return causes(error).some(cause => typeof (cause as { errorCode?: unknown }).errorCode === 'string');
 }
