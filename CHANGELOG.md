@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.2](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.1...v6.1.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* reuse the cached Entra sign-in once several tenants are signed in ([f381f6d](https://github.com/FallDownTheSystem/sqlq/commit/f381f6d483ad401d379bbb2897c47977f2e6469f))
+
 ## [6.1.1](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.0...v6.1.1) (2026-11-06)
 
 
