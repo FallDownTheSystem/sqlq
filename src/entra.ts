@@ -113,6 +113,22 @@ export function matchAccounts(accounts: AccountInfo[], user: string): AccountInf
 	return accounts.filter(account => account.username.toLowerCase() === wanted);
 }
 
+/**
+ * The cached account to refresh silently for a tenant. MSAL lists one
+ * account per tenant the user signed in to, all sharing a home account ID
+ * and one refresh token, so several entries can be the same person. Prefers
+ * the entry for the tenant, then the home tenant's. Resolves undefined when
+ * the entries belong to different people and no user setting picks one.
+ */
+export function pickAccount(accounts: AccountInfo[], tenant: string | undefined): AccountInfo | undefined {
+	const people = new Set(accounts.map(account => account.homeAccountId));
+	if (people.size !== 1) return undefined;
+	const wanted = tenant?.toLowerCase();
+	return accounts.find(account => wanted !== undefined && account.tenantId.toLowerCase() === wanted)
+		?? accounts.find(account => account.homeAccountId.toLowerCase().endsWith(`.${account.tenantId.toLowerCase()}`))
+		?? accounts[0];
+}
+
 const TENANT_PATTERN = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i;
 
 /**
@@ -271,12 +287,12 @@ export class EntraLogin {
 		if (known && known.expiresOnTimestamp - Date.now() > 2 * 60_000) {
 			return known;
 		}
-		const accounts = await this.cachedAccounts();
-		if (accounts.length !== 1) return undefined;
+		const account = pickAccount(await this.cachedAccounts(), tenant);
+		if (!account) return undefined;
 		const app = await this.client();
 		try {
 			// One refresh token serves every tenant the account is a member or guest of.
-			const result = await app.acquireTokenSilent({ account: accounts[0]!, scopes: [SQL_SCOPE], authority: authority(tenant) });
+			const result = await app.acquireTokenSilent({ account, scopes: [SQL_SCOPE], authority: authority(tenant) });
 			this.remember(tenant, result.accessToken, result.expiresOn);
 			return this.tokens.get(tenant ?? '');
 		} catch {
