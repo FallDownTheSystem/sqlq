@@ -23,7 +23,7 @@ npm test               # Jest
 
 ### Entry Point
 
-`src/index.ts` — Commander-based CLI. Reads connection config from settings resolved by `src/environment.ts` (project `.env`/`.env.<name>`, then shell variables, then the global `sqlq/.env` in the user config directory) or CLI flags, validates with Zod, creates a `ConnectionManager`, and registers commands. Connection to SQL Server is deferred until the first command actually runs (handled by `preAction` / `postAction` hooks).
+`src/index.ts` — Commander-based CLI. Reads connection config from settings resolved by `src/environment.ts` (project `.env`/`.env.<name>`, then shell variables, then for `-e <name>` the global folder's `sqlq/.env.<name>`, then the global `sqlq/.env` in the user config directory) or CLI flags, validates with Zod, creates a `ConnectionManager`, and registers commands. Connection to SQL Server is deferred until the first command actually runs (handled by `preAction` / `postAction` hooks).
 
 ### Tool System
 
@@ -52,9 +52,9 @@ To add a new command: create a tool in `src/tools/`, extend `BaseTool`, export f
 ## Environment Variables
 
 Required: `SQLSERVER_HOST`, `SQLSERVER_USER`, `SQLSERVER_PASSWORD`
-Optional: `SQLSERVER_DATABASE`, `SQLSERVER_PORT` (1433), `SQLSERVER_ENCRYPT` (true), `SQLSERVER_TRUST_CERT` (true), `SQLSERVER_CONNECTION_TIMEOUT` (30000), `SQLSERVER_REQUEST_TIMEOUT` (60000), `SQLSERVER_MAX_ROWS` (1000)
+Optional: `SQLSERVER_DATABASE`, `SQLSERVER_PORT` (1433), `SQLSERVER_ENCRYPT` (true), `SQLSERVER_TRUST_CERT` (true), `SQLSERVER_CONNECTION_TIMEOUT` (30000), `SQLSERVER_REQUEST_TIMEOUT` (60000), `SQLSERVER_MAX_ROWS` (1000), `SQLSERVER_AUTH` (`sql`, or `entra-mfa` for Microsoft Entra MFA via `src/entra.ts`; then no password is needed), `SQLSERVER_TENANT_ID`, `SQLSERVER_CLIENT_ID`
 
-With `-e/--env <name>`, the shell and the global file use named keys (`SQLSERVER_<NAME>_HOST`), and `.env.<name>` uses plain keys. A named environment never reads the default keys.
+With `-e/--env <name>`, the shell and the global file use named keys (`SQLSERVER_<NAME>_HOST`), and `.env.<name>` (project or global folder) uses plain keys. A named environment never reads the default keys.
 
 Any of these can be overridden by CLI flags (`--host`, `--user`, `--password`, `-d/--database`, `--port`, etc.).
 

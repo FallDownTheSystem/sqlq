@@ -1,4 +1,6 @@
 import sql from 'mssql';
+import { entraCacheFile, entraLogin, SQL_SCOPE } from './entra.js';
+import { SqlqError } from './errors.js';
 import { ConnectionConfig, QueryParam } from './types.js';
 
 export class SqlServerConnection {
@@ -21,8 +23,7 @@ export class SqlServerConnection {
     const sqlConfig: sql.config = {
       server: this.config.server,
       database: this.config.database,
-      user: this.config.user,
-      password: this.config.password,
+      ...(await this.credentials()),
       port: this.config.port,
       options: {
         encrypt: this.config.encrypt,
@@ -39,6 +40,34 @@ export class SqlServerConnection {
 
     this.pool = new sql.ConnectionPool(sqlConfig);
     await this.pool.connect();
+  }
+
+  private async credentials(): Promise<Pick<sql.config, 'user' | 'password' | 'authentication'>> {
+    if (this.config.authentication === 'sql') {
+      return { user: this.config.user, password: this.config.password };
+    }
+    const credential = entraLogin({
+      user: this.config.user,
+      tenantId: this.config.tenantId,
+      clientId: this.config.clientId,
+      cacheFile: entraCacheFile(),
+    }).credential();
+    // Sign in before connecting, so the connect timeout does not run during MFA.
+    try {
+      await credential.getToken(SQL_SCOPE);
+    } catch (error) {
+      throw new SqlqError(
+        `Microsoft Entra sign-in failed: ${error instanceof Error ? error.message : String(error)}`,
+        'AUTH_ERROR',
+        undefined,
+        [
+          'Sign in again with: sqlq auth set (add -e <name> for a named environment)',
+          'For a guest account, set SQLSERVER_TENANT_ID to the tenant of the database',
+          'If the tenant blocks the default sign-in app, set SQLSERVER_CLIENT_ID to an app registration with an http://localhost redirect URI',
+        ],
+      );
+    }
+    return { authentication: { type: 'token-credential', options: { credential } } };
   }
 
   async disconnect(): Promise<void> {

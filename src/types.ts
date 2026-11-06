@@ -10,8 +10,12 @@ export interface QueryParam {
 export const ConnectionConfigSchema = z.object({
   server: z.string(),
   database: z.string().optional(),
+  authentication: z.enum(['sql', 'entra-mfa']).optional().default('sql'),
   user: z.string(),
-  password: z.string(),
+  /** Unused with Entra authentication. */
+  password: z.string().optional().default(''),
+  tenantId: z.string().optional(),
+  clientId: z.string().optional(),
   port: z.number().optional().default(1433),
   encrypt: z.boolean().optional().default(true),
   trustServerCertificate: z.boolean().optional().default(true),

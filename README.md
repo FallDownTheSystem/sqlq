@@ -37,6 +37,9 @@ You can also set these optional variables:
 | `SQLSERVER_CONNECTION_TIMEOUT` | `30000` | Connection timeout (ms) |
 | `SQLSERVER_REQUEST_TIMEOUT` | `60000` | Query timeout (ms) |
 | `SQLSERVER_MAX_ROWS` | `1000` | Max rows returned per query |
+| `SQLSERVER_AUTH` | `sql` | `sql` for a SQL login, `entra-mfa` for [Microsoft Entra MFA](#microsoft-entra-mfa) |
+| `SQLSERVER_TENANT_ID` | home tenant | Entra tenant ID or domain, for guest accounts |
+| `SQLSERVER_CLIENT_ID` | Azure CLI app | Entra app (client) ID used to sign in |
 
 ### Where settings come from
 
@@ -66,6 +69,22 @@ Entries use the service `sqlq` and the account `user@host:port` of the resolved 
 
 `auth set` also accepts `--password-stdin`. On Linux it needs a running Secret Service provider such as GNOME Keyring or KWallet.
 
+### Microsoft Entra MFA
+
+`SQLSERVER_AUTH=entra-mfa` (or `--auth entra-mfa`) signs in the way "Microsoft Entra MFA" does in SSMS: the first command opens the browser for sign-in and MFA, and no password is used.
+
+```bash
+# %APPDATA%\sqlq\.env.prod
+SQLSERVER_HOST=myserver.database.windows.net
+SQLSERVER_DATABASE=appdb
+SQLSERVER_AUTH=entra-mfa
+SQLSERVER_USER=you@example.com   # optional: pre-fills the sign-in and picks the cached account
+```
+
+The sign-in is cached in `sqlq/entra-token-cache.json` next to the global file, encrypted with a key kept in the OS keychain, and refreshed silently until the tenant asks for MFA again. `sqlq auth set` signs in again (and lets you pick another account); `sqlq auth clear` signs out. Without a working OS keychain the sign-in still works but is not remembered.
+
+For a guest account, set `SQLSERVER_TENANT_ID` to the tenant that owns the database. Sign-in uses the public client ID of the Azure CLI, as `@azure/identity` does; if your tenant only allows its own apps, set `SQLSERVER_CLIENT_ID` to an app registration with `http://localhost` as a mobile and desktop redirect URI.
+
 ### Multiple servers
 
 Select a named environment with `-e/--env`:
@@ -76,13 +95,14 @@ sqlq -e production query "SELECT TOP 10 * FROM dbo.Orders"
 sqlq -e release config      # Show the sources and settings that were used
 ```
 
-A named environment uses the same three sources:
+A named environment reads these sources, highest priority first:
 
 1. The project file `.env.<name>`, with plain keys (`SQLSERVER_HOST`)
 2. Shell variables with the name in the key: `-e prod-eu` reads `SQLSERVER_PROD_EU_HOST`, `SQLSERVER_PROD_EU_USER`, and so on
-3. The global file, with the same named keys
+3. `.env.<name>` in the global folder, for example `%APPDATA%\sqlq\.env.prod`, with plain keys
+4. The global file, with the same named keys as the shell variables
 
-The name is upper-cased and `-` becomes `_` in variable names. One global file can hold many environments:
+The name is upper-cased and `-` becomes `_` in variable names. Either give each environment its own `.env.<name>` in the global folder, or keep many in one global file:
 
 ```bash
 # %APPDATA%\sqlq\.env
@@ -145,6 +165,7 @@ When stdout isn't a TTY (piped or redirected), it automatically falls back to pl
 
 ```
 -e, --env <name>         Use a named environment (.env.<name>, SQLSERVER_<NAME>_*)
+--auth <type>            Override SQLSERVER_AUTH (sql or entra-mfa)
 -d, --database <name>    Target database
 --host <host>            Override SQLSERVER_HOST
 --user <user>            Override SQLSERVER_USER

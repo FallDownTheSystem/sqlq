@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import type { EntraLogin } from '../entra.js';
 import { deleteKeychainPassword, storeKeychainPassword } from '../keychain.js';
 import { getOutputMode, outputError, outputJson, outputPlain, pc, type OutputMode } from './output.js';
 
@@ -9,6 +10,8 @@ export interface AuthContext {
 	password: string | undefined;
 	/** Why a stored password would not be used, when another source sets one. */
 	shadowedBy: string | undefined;
+	/** Set with Entra authentication: sign in and out instead of storing a password. */
+	entra: EntraLogin | undefined;
 }
 
 type AuthContextGetter = () => Promise<AuthContext>;
@@ -82,7 +85,10 @@ async function run(
 	} catch (error) {
 		outputError(error instanceof InputError
 			? { error: error.message, code: 'VALIDATION_ERROR' }
-			: {
+			: ctx.entra ? {
+				error: `Microsoft Entra: ${error instanceof Error ? error.message : String(error)}`,
+				code: 'AUTH_ERROR',
+			} : {
 				error: `OS keychain: ${error instanceof Error ? error.message : String(error)}`,
 				code: 'KEYCHAIN_ERROR',
 				suggestions: [
@@ -97,12 +103,17 @@ async function run(
 export function registerAuthCommands(program: Command, getContext: AuthContextGetter): void {
 	const auth = program
 		.command('auth')
-		.description('Manage the password stored in the OS keychain for the resolved user@host:port login');
+		.description('Manage the password stored in the OS keychain for the resolved user@host:port login, or the Microsoft Entra sign-in');
 
 	auth
 		.command('set')
-		.description('Prompt for the password and store it in the OS keychain')
+		.description('Prompt for the password and store it in the OS keychain; with entra-mfa, sign in')
 		.action(() => run(program, getContext, async (ctx, mode) => {
+			if (ctx.entra) {
+				const account = await ctx.entra.signIn(true);
+				report(mode, { signedIn: true, account: account.username }, `Signed in to Microsoft Entra as ${account.username}`);
+				return;
+			}
 			const password = ctx.password ?? await promptHidden(`Password for ${ctx.account}: `);
 			if (!password) {
 				throw new InputError('Password is empty; nothing stored');
@@ -116,8 +127,19 @@ export function registerAuthCommands(program: Command, getContext: AuthContextGe
 
 	auth
 		.command('clear')
-		.description('Remove the stored password from the OS keychain')
+		.description('Remove the stored password from the OS keychain; with entra-mfa, sign out')
 		.action(() => run(program, getContext, async (ctx, mode) => {
+			if (ctx.entra) {
+				const accounts = await ctx.entra.signOut();
+				report(
+					mode,
+					{ signedOut: accounts },
+					accounts.length > 0
+						? `Signed out of Microsoft Entra: ${accounts.join(', ')}`
+						: `No cached Microsoft Entra sign-in for ${ctx.account}`,
+				);
+				return;
+			}
 			const deleted = await deleteKeychainPassword(ctx.account);
 			report(
 				mode,

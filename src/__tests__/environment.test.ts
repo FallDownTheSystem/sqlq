@@ -53,6 +53,7 @@ describe('environment', () => {
 				sources: [],
 				projectFile: { path: join(cwd, '.env'), exists: false },
 				globalFile: { path: globalFile, exists: false },
+				globalEnvFile: undefined,
 			});
 		});
 
@@ -112,6 +113,25 @@ describe('environment', () => {
 			const result = resolveIn('test', { SQLSERVER_DATABASE: 'default' });
 
 			expect(result.settings).toEqual({ HOST: 'test' });
+		});
+
+		it('should read plain keys from .env.<name> in the global folder, between shell variables and the global file', () => {
+			const globalEnvFile = join(root, 'config', 'sqlq', '.env.prod');
+			writeFileSync(globalEnvFile, 'SQLSERVER_HOST=global-env\nSQLSERVER_USER=global-env\nSQLSERVER_PROD_DATABASE=wrong\n');
+			writeFileSync(globalFile, 'SQLSERVER_PROD_USER=global\nSQLSERVER_PROD_PORT=1444\nSQLSERVER_DATABASE=default\n');
+
+			const result = resolveIn('prod', { SQLSERVER_PROD_HOST: 'shell' });
+
+			expect(result.settings).toEqual({ HOST: 'shell', USER: 'global-env', PORT: '1444' });
+			expect(result.sources).toEqual(['environment variables', globalEnvFile, globalFile]);
+			expect(result.globalEnvFile).toEqual({ path: globalEnvFile, exists: true });
+		});
+
+		it('should resolve a named environment from the global folder\'s .env.<name> alone', () => {
+			writeFileSync(join(root, 'config', 'sqlq', '.env.prod'), 'SQLSERVER_HOST=prod\n');
+
+			expect(resolveIn('prod').settings).toEqual({ HOST: 'prod' });
+			expect(() => resolveIn('test')).toThrow('Environment "test" not found');
 		});
 
 		it('should ignore prefixed keys inside .env.<name>', () => {

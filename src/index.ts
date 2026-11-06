@@ -14,6 +14,7 @@ import {
 	variableName,
 } from './environment.js';
 import { keychainAccount, readKeychainPassword } from './keychain.js';
+import { entraCacheFile, entraLogin } from './entra.js';
 import { settingsHelp } from './cli/settings-help.js';
 import { registerAuthCommands } from './cli/auth.js';
 import {
@@ -45,6 +46,7 @@ let environment: ResolvedEnvironment | undefined;
 /** CLI flags win over every settings source. */
 function buildConfig(opts: GlobalOptions, settings: Settings): Record<string, unknown> {
 	return {
+		authentication: opts.auth ?? settings.AUTH ?? 'sql',
 		server: opts.host ?? settings.HOST ?? 'localhost',
 		database: opts.database ?? settings.DATABASE,
 		user: opts.user ?? settings.USER ?? '',
@@ -55,6 +57,8 @@ function buildConfig(opts: GlobalOptions, settings: Settings): Record<string, un
 		connectionTimeout: opts.timeout ?? parseInt(settings.CONNECTION_TIMEOUT ?? '30000'),
 		requestTimeout: parseInt(settings.REQUEST_TIMEOUT ?? '60000'),
 		maxRows: opts.maxRows ?? parseInt(settings.MAX_ROWS ?? '1000'),
+		tenantId: settings.TENANT_ID,
+		clientId: settings.CLIENT_ID,
 	};
 }
 
@@ -73,7 +77,7 @@ interface KeychainLookup {
  * or settings source supplies a password, so existing setups never touch it.
  */
 async function lookupKeychain(config: Record<string, unknown>): Promise<KeychainLookup | undefined> {
-	if (config.password || !config.user) return undefined;
+	if (config.authentication !== 'sql' || config.password || !config.user) return undefined;
 	const account = loginAccount(config);
 	try {
 		const password = await readKeychainPassword(account);
@@ -121,6 +125,7 @@ function initializeTools(cm: ConnectionManager, maxRows: number): Map<string, Ba
 
 interface GlobalOptions {
 	env?: string;
+	auth?: string;
 	json?: boolean;
 	plain?: boolean;
 	database?: string;
@@ -145,12 +150,17 @@ async function readPasswordFromStdin(): Promise<string> {
 	});
 }
 
+function isEntra(config: Record<string, unknown>): boolean {
+	return config.authentication === 'entra-mfa';
+}
+
 function buildConnectionString(config: Record<string, unknown>): string {
 	const parts = [
 		`Server=${config.server},${config.port}`,
 		config.database ? `Database=${config.database}` : null,
-		`User Id=${config.user}`,
-		`Password=${config.password || ''}`,
+		...(isEntra(config)
+			? ['Authentication=Active Directory Interactive', config.user ? `User Id=${config.user}` : null]
+			: [`User Id=${config.user}`, `Password=${config.password || ''}`]),
 		`Encrypt=${config.encrypt ? 'yes' : 'no'}`,
 		`TrustServerCertificate=${config.trustServerCertificate ? 'yes' : 'no'}`,
 		`Connection Timeout=${Math.floor(Number(config.connectionTimeout) / 1000)}`,
@@ -163,8 +173,9 @@ function buildSqlcmdArgs(config: Record<string, unknown>): string {
 		'sqlcmd',
 		`-S "${config.server},${config.port}"`,
 		config.database ? `-d "${config.database}"` : null,
-		`-U "${config.user}"`,
-		`-P "${config.password || ''}"`,
+		...(isEntra(config)
+			? ['--authentication-method ActiveDirectoryInteractive', config.user ? `-U "${config.user}"` : null]
+			: [`-U "${config.user}"`, `-P "${config.password || ''}"`]),
 		config.trustServerCertificate ? '-C' : null,
 		config.encrypt ? '-N' : null,
 		`-l ${Math.floor(Number(config.connectionTimeout) / 1000)}`,
@@ -180,6 +191,7 @@ async function main(): Promise<void> {
 		.description('Read-only SQL Server CLI - explore databases, tables, schemas, and run queries')
 		.version(version)
 		.option('-e, --env <name>', 'Use the named environment: .env.<name> and SQLSERVER_<NAME>_* settings')
+		.option('--auth <type>', 'Authentication: "sql" or "entra-mfa" (overrides SQLSERVER_AUTH)')
 		.option('--json', 'Output raw JSON to stdout')
 		.option('--plain', 'Plain text output, no tables or colors')
 		.option('-d, --database <name>', 'Target database')
@@ -222,7 +234,7 @@ async function main(): Promise<void> {
 			const globalOpts = program.opts<GlobalOptions>();
 			const rawConfig = buildConfig(globalOpts, environment.settings);
 			const mode = getOutputMode(globalOpts);
-			const { projectFile, globalFile } = environment;
+			const { projectFile, globalFile, globalEnvFile } = environment;
 			const keychain = await lookupKeychain(rawConfig);
 			const sources = keychain?.password ? [...environment.sources, 'OS keychain'] : environment.sources;
 			// A keychain password is never printed: it stays out of terminals and agent transcripts.
@@ -233,15 +245,20 @@ async function main(): Promise<void> {
 			const configData = {
 				environment: environment.name ?? '(default)',
 				projectFile: describeFile(projectFile),
+				...(globalEnvFile ? { globalEnvFile: describeFile(globalEnvFile) } : {}),
 				globalFile: describeFile(globalFile),
 				variables: `${variablePrefix(environment.name)}*`,
 				sources: sources.length > 0 ? sources.join('; ') : '(none)',
-				keychain: describeKeychain(keychain),
+				authentication: rawConfig.authentication,
+				...(isEntra(rawConfig) ? {
+					tenantId: rawConfig.tenantId ?? '(home tenant)',
+					entraCache: entraCacheFile(),
+				} : { keychain: describeKeychain(keychain) }),
 				server: rawConfig.server,
 				port: rawConfig.port,
 				database: rawConfig.database ?? '(default)',
 				user: rawConfig.user,
-				password: rawConfig.password || '',
+				...(isEntra(rawConfig) ? {} : { password: rawConfig.password || '' }),
 				encrypt: rawConfig.encrypt,
 				trustServerCertificate: rawConfig.trustServerCertificate,
 				connectionTimeout: rawConfig.connectionTimeout,
@@ -256,6 +273,7 @@ async function main(): Promise<void> {
 				outputJson({
 					...configData,
 					projectFile,
+					...(globalEnvFile ? { globalEnvFile } : {}),
 					globalFile,
 					sources,
 					connectionString: connStr,
@@ -296,10 +314,24 @@ async function main(): Promise<void> {
 		}
 		const opts = program.opts<GlobalOptions>();
 		const config = buildConfig(opts, environment.settings);
+		if (isEntra(config)) {
+			return {
+				account: String(config.user || '(any Entra account)'),
+				password: undefined,
+				shadowedBy: undefined,
+				entra: entraLogin({
+					user: String(config.user),
+					tenantId: config.tenantId as string | undefined,
+					clientId: config.clientId as string | undefined,
+					cacheFile: entraCacheFile(),
+				}),
+			};
+		}
 		if (!config.user) {
 			throw new Error('No user resolved: the keychain stores passwords per user@host:port login');
 		}
 		return {
+			entra: undefined,
 			account: loginAccount(config),
 			password: opts.passwordStdin ? await readPasswordFromStdin() : opts.password,
 			shadowedBy: environment.settings.PASSWORD
@@ -325,6 +357,7 @@ async function main(): Promise<void> {
 				code: 'VALIDATION_ERROR',
 				suggestions: [
 					'Create the file .env.<name> in the current directory, for example .env.test',
+					`Or create .env.<name> next to the global file ${globalConfigFile()}`,
 					'Or set SQLSERVER_<NAME>_HOST, SQLSERVER_<NAME>_USER, ... in the shell or in the global file',
 					'Run without --env to use the default settings',
 				],
@@ -345,6 +378,16 @@ async function main(): Promise<void> {
 			rawConfig.password = keychain.password;
 		}
 
+		if (rawConfig.authentication !== 'sql' && !isEntra(rawConfig)) {
+			outputError({
+				error: `Unknown authentication "${rawConfig.authentication}"`,
+				code: 'VALIDATION_ERROR',
+				suggestions: ['Set SQLSERVER_AUTH or --auth to "sql" (default) or "entra-mfa"'],
+			}, getOutputMode(opts));
+			process.exitCode = 1;
+			throw new Error('Unknown authentication');
+		}
+
 		let config;
 		try {
 			config = ConnectionConfigSchema.parse(rawConfig);
@@ -362,7 +405,7 @@ async function main(): Promise<void> {
 			throw error;
 		}
 
-		if (!config.user || !config.password) {
+		if (config.authentication === 'sql' && (!config.user || !config.password)) {
 			const mode = getOutputMode(opts);
 			outputError({
 				error: 'Missing credentials: user and password are required',

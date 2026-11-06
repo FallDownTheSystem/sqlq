@@ -1,7 +1,7 @@
 import { parse } from 'dotenv';
 import { readFileSync } from 'fs';
 import { homedir } from 'os';
-import { join, resolve } from 'path';
+import { dirname, join, resolve } from 'path';
 
 export const SETTING_KEYS = [
 	'HOST',
@@ -14,6 +14,9 @@ export const SETTING_KEYS = [
 	'CONNECTION_TIMEOUT',
 	'REQUEST_TIMEOUT',
 	'MAX_ROWS',
+	'AUTH',
+	'TENANT_ID',
+	'CLIENT_ID',
 ] as const;
 
 export type SettingKey = typeof SETTING_KEYS[number];
@@ -31,6 +34,8 @@ export interface ResolvedEnvironment {
 	sources: string[];
 	projectFile: SettingsFile;
 	globalFile: SettingsFile;
+	/** `.env.<name>` next to the global file; only for a named environment. */
+	globalEnvFile: SettingsFile | undefined;
 }
 
 export interface EnvironmentOptions {
@@ -97,7 +102,8 @@ function pick(values: Record<string, string | undefined>, envName: string | unde
 
 /**
  * Layers settings by key, highest priority first: the project file (`.env` or
- * `.env.<name>`), then shell variables, then the global file. A named
+ * `.env.<name>`), then shell variables, then, for a named environment, the
+ * global folder's `.env.<name>`, and last the global file. A named
  * environment reads only that environment's keys in every source and never
  * the default ones. Layering them would let a key missing from `.env.test`
  * silently fall back to whatever server the defaults point at, which may be
@@ -111,10 +117,17 @@ export function resolveEnvironment(envName: string | undefined, options: Environ
 	const localPath = resolve(options.cwd, projectFileName(envName));
 	const localValues = readEnvFile(localPath);
 	const globalValues = readEnvFile(options.globalFile);
+	const globalEnvPath = envName === undefined
+		? undefined
+		: join(dirname(options.globalFile), projectFileName(envName));
+	const globalEnvValues = globalEnvPath === undefined ? undefined : readEnvFile(globalEnvPath);
 
 	const layers: Array<{ source: string; settings: Settings }> = [
 		{ source: localPath, settings: localValues ? pick(localValues, undefined) : {} },
 		{ source: 'environment variables', settings: pick(options.variables, envName) },
+		...(globalEnvPath === undefined ? [] : [
+			{ source: globalEnvPath, settings: globalEnvValues ? pick(globalEnvValues, undefined) : {} },
+		]),
 		{ source: options.globalFile, settings: globalValues ? pick(globalValues, envName) : {} },
 	];
 
@@ -135,7 +148,7 @@ export function resolveEnvironment(envName: string | undefined, options: Environ
 		throw new Error(
 			`Environment "${envName}" not found: no settings in ${localPath}, `
 			+ `no ${variableName('HOST', envName)}-style environment variables, `
-			+ `and none in ${options.globalFile}`,
+			+ `none in ${globalEnvPath} and none in ${options.globalFile}`,
 		);
 	}
 
@@ -145,5 +158,8 @@ export function resolveEnvironment(envName: string | undefined, options: Environ
 		sources,
 		projectFile: { path: localPath, exists: localValues !== undefined },
 		globalFile: { path: options.globalFile, exists: globalValues !== undefined },
+		globalEnvFile: globalEnvPath === undefined
+			? undefined
+			: { path: globalEnvPath, exists: globalEnvValues !== undefined },
 	};
 }
