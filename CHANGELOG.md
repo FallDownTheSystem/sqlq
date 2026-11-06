@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.3](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.2...v6.1.3) (2026-11-06)
+
+
+### Miscellaneous
+
+* republish 6.1.2 as 6.1.3 ([48961af](https://github.com/FallDownTheSystem/sqlq/commit/48961af9aeb34df3b266093d850a2c56c4dcf55a))
+
 ## [6.1.2](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.1...v6.1.2) (2026-11-06)
 
 
