@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.1](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.0...v6.1.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* sign in to the Entra tenant the server asks for ([01f033a](https://github.com/FallDownTheSystem/sqlq/commit/01f033ad5f2057e2c16f549dc3d276173bf82374))
+
 ## [6.1.0](https://github.com/FallDownTheSystem/sqlq/compare/v6.0.2...v6.1.0) (2026-11-06)
 
 
