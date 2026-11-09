@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.4](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.3...v6.1.4) (2026-11-09)
+
+
+### Dependencies
+
+* bump mssql to 12.7.14 ([#13](https://github.com/FallDownTheSystem/sqlq/issues/13)) ([f3c71e9](https://github.com/FallDownTheSystem/sqlq/commit/f3c71e99cab917613e96dc264242e1e63793ef97))
+
 ## [6.1.3](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.2...v6.1.3) (2026-11-06)
 
 
