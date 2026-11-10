@@ -46,10 +46,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@azure/msal-node": "^7.2.0",
+    "@azure/msal-node": "^7.2.1",
     "@napi-rs/keyring": "^2.1.2",
     "cli-table3": "^0.6.5",
-    "commander": "^15.0.0",
+    "commander": "^15.1.0",
     "dotenv": "^18.0.9",
     "mssql": "^12.7.14",
     "open": "^11.0.4",
