@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.6](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.5...v6.1.6) (2026-11-12)
+
+
+### Dependencies
+
+* **deps:** bump dotenv ([#17](https://github.com/FallDownTheSystem/sqlq/issues/17)) ([dfe7a18](https://github.com/FallDownTheSystem/sqlq/commit/dfe7a18b9e3159ddbeffa4115c10728e4c098ef6))
+
 ## [6.1.5](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.4...v6.1.5) (2026-11-10)
 
 
