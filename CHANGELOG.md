@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.8](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.7...v6.1.8) (2026-11-16)
+
+
+### Dependencies
+
+* bump @azure/msal-node to 7.2.2 ([#21](https://github.com/FallDownTheSystem/sqlq/issues/21)) ([18cac55](https://github.com/FallDownTheSystem/sqlq/commit/18cac550cb8da45f7802959e9ff66d23933399f9))
+
 ## [6.1.7](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.6...v6.1.7) (2026-11-13)
 
 
