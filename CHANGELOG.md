@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.9](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.8...v6.1.9) (2026-11-17)
+
+
+### Dependencies
+
+* **deps-dev:** bump eslint ([#23](https://github.com/FallDownTheSystem/sqlq/issues/23)) ([3f5339b](https://github.com/FallDownTheSystem/sqlq/commit/3f5339b651cf7e694bf14b15099f6f6ffcc69660))
+
 ## [6.1.8](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.7...v6.1.8) (2026-11-16)
 
 
