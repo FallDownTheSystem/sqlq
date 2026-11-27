@@ -1,5 +1,12 @@
 # Changelog
 
+## [6.1.15](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.14...v6.1.15) (2026-11-27)
+
+
+### Dependencies
+
+* **deps-dev:** bump the npm-minor-and-patch group with 2 updates ([#35](https://github.com/FallDownTheSystem/sqlq/issues/35)) ([da76dd3](https://github.com/FallDownTheSystem/sqlq/commit/da76dd3408df2d85635801c7fc92abc74afab85f))
+
 ## [6.1.14](https://github.com/FallDownTheSystem/sqlq/compare/v6.1.13...v6.1.14) (2026-11-26)
 
 
